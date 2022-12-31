@@ -47,6 +47,6 @@ No modules.
 |------|-------------|
 | <a name="output_bucket"></a> [bucket](#output\_bucket) | The name of the bucket that will server this site. |
 | <a name="output_bucket_fqdn"></a> [bucket\_fqdn](#output\_bucket\_fqdn) | The FQDN of the bucket that will serve this static site. |
-| <a name="output_environment"></a> [environment](#output\_environment) | The domain to which the redirect will point. |
-| <a name="output_hostname"></a> [hostname](#output\_hostname) | The domain that will serve a redirect. |
+| <a name="output_environment"></a> [environment](#output\_environment) | The environment that this static site belongs to. |
+| <a name="output_hostname"></a> [hostname](#output\_hostname) | The FQDN where this static site will be accessible. (Also becomes the bucket name.)) |
 <!-- END_TF_DOCS -->

@@ -3,6 +3,9 @@
 name: Terraform Module PR
 on:
   - pull_request
+  - label
+  - push
+
 jobs:
   validate_formatting:
     name: Validate Terraform formatting

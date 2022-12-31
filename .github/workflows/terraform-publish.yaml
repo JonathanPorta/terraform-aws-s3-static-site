@@ -4,6 +4,7 @@ name: Release Terraform Module
 on:
   pull_request:
     types: [closed]
+
 jobs:
   release:
     if: github.event.pull_request.merged == true

@@ -2,9 +2,13 @@
 
 name: Terraform Module PR
 on:
-  - pull_request
-  - label
-  - push
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
 
 jobs:
   validate_formatting:

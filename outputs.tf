@@ -1,9 +1,9 @@
 output "hostname" {
-  description = "The domain that will serve a redirect."
+  description = "The FQDN where this static site will be accessible. (Also becomes the bucket name.))"
   value       = var.hostname
 }
 output "environment" {
-  description = "The domain to which the redirect will point."
+  description = "The environment that this static site belongs to."
   value       = var.environment
 }
 output "bucket_fqdn" {

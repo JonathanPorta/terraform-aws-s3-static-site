@@ -11,7 +11,7 @@ variable "source_files" {
   type        = string
 }
 
-variable "routing_rules" {
+variable "routing_rule" {
   description = "An optional list of routing rules to apply to the bucket."
   type = list(object({
     Condition = object({
@@ -28,6 +28,7 @@ variable "routing_rules" {
   }))
   default = []
 }
+
 variable "index_document_suffix" {
   description = "The optional name of the index document to use for the bucket."
   type        = string

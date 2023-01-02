@@ -30,7 +30,7 @@ resource "aws_s3_bucket_website_configuration" "app_bucket_website" {
     key = var.error_document_key
   }
 
-  routing_rules = var.routing_rules
+  routing_rule = var.routing_rule
 }
 
 locals {

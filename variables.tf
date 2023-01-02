@@ -11,22 +11,35 @@ variable "source_files" {
   type        = string
 }
 
-variable "routing_rule" {
-  description = "An optional list of routing rules to apply to the bucket."
-  type = list(object({
-    Condition = object({
-      HttpErrorCodeReturnedEquals = string
-      KeyPrefixEquals             = string
-    })
-    Redirect = object({
-      HostName             = string
-      HttpRedirectCode     = string
-      Protocol             = string
-      ReplaceKeyPrefixWith = string
-      ReplaceKeyWith       = string
-    })
-  }))
-  default = []
+# variable "routing_rule" {
+#   description = "An optional list of routing rules to apply to the bucket."
+#   type        = string
+#   # list(object({
+#   #   Condition = object({
+#   #     HttpErrorCodeReturnedEquals = string
+#   #     KeyPrefixEquals             = string
+#   #   })
+#   #   Redirect = object({
+#   #     HostName             = string
+#   #     HttpRedirectCode     = string
+#   #     Protocol             = string
+#   #     ReplaceKeyPrefixWith = string
+#   #     ReplaceKeyWith       = string
+#   #   })
+#   # }))
+#   default = ""
+# }
+
+variable "routing_rule_key_prefix_equals" {
+  description = "The optional key prefix to match."
+  type        = string
+  default     = null
+}
+
+variable "routing_rule_replace_key_with" {
+  description = "The optional name key to replace with."
+  type        = string
+  default     = null
 }
 
 variable "index_document_suffix" {

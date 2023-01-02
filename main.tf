@@ -30,7 +30,22 @@ resource "aws_s3_bucket_website_configuration" "app_bucket_website" {
     key = var.error_document_key
   }
 
-  routing_rule = var.routing_rule
+  dynamic "routing_rule" {
+    for_each = var.routing_rule
+    content {
+      Condition = {
+        HttpErrorCodeReturnedEquals = routing_rule.value.Condition.HttpErrorCodeReturnedEquals
+        KeyPrefixEquals             = routing_rule.value.Condition.KeyPrefixEquals
+      }
+      Redirect = {
+        HostName             = routing_rule.value.Redirect.HostName
+        HttpRedirectCode     = routing_rule.value.Redirect.HttpRedirectCode
+        Protocol             = routing_rule.value.Redirect.Protocol
+        ReplaceKeyPrefixWith = routing_rule.value.Redirect.ReplaceKeyPrefixWith
+        ReplaceKeyWith       = routing_rule.value.Redirect.ReplaceKeyWith
+      }
+    }
+  }
 }
 
 locals {

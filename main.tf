@@ -24,11 +24,13 @@ resource "aws_s3_bucket_policy" "app_bucket_policy" {
 resource "aws_s3_bucket_website_configuration" "app_bucket_website" {
   bucket = aws_s3_bucket.app_bucket.id
   index_document {
-    suffix = "index.html"
+    suffix = var.index_document_suffix
   }
   error_document {
-    key = "error.html"
+    key = var.error_document_key
   }
+
+  routing_rules = var.routing_rules
 }
 
 locals {

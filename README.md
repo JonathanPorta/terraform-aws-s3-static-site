@@ -41,7 +41,8 @@ No modules.
 | <a name="input_error_document_key"></a> [error\_document\_key](#input\_error\_document\_key) | The optional name of the error document to use for the bucket. | `string` | `"index.html"` | no |
 | <a name="input_hostname"></a> [hostname](#input\_hostname) | The FQDN where this static site will be accessible. | `string` | n/a | yes |
 | <a name="input_index_document_suffix"></a> [index\_document\_suffix](#input\_index\_document\_suffix) | The optional name of the index document to use for the bucket. | `string` | `"index.html"` | no |
-| <a name="input_routing_rule"></a> [routing\_rule](#input\_routing\_rule) | An optional list of routing rules to apply to the bucket. | <pre>list(object({<br>    Condition = object({<br>      HttpErrorCodeReturnedEquals = string<br>      KeyPrefixEquals             = string<br>    })<br>    Redirect = object({<br>      HostName             = string<br>      HttpRedirectCode     = string<br>      Protocol             = string<br>      ReplaceKeyPrefixWith = string<br>      ReplaceKeyWith       = string<br>    })<br>  }))</pre> | `[]` | no |
+| <a name="input_routing_rule_key_prefix_equals"></a> [routing\_rule\_key\_prefix\_equals](#input\_routing\_rule\_key\_prefix\_equals) | The optional key prefix to match. | `string` | `null` | no |
+| <a name="input_routing_rule_replace_key_with"></a> [routing\_rule\_replace\_key\_with](#input\_routing\_rule\_replace\_key\_with) | The optional name key to replace with. | `string` | `null` | no |
 | <a name="input_source_files"></a> [source\_files](#input\_source\_files) | A path to the website's source files. These will be uploaded to the bucket. | `string` | n/a | yes |
 
 ## Outputs

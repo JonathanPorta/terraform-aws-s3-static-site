@@ -6,30 +6,14 @@ resource "aws_s3_bucket" "app_bucket" {
     Environment = var.environment
   }
 }
-# data "aws_s3_bucket" "app_bucket" {
-#   bucket = var.hostname
-# }
 
-# resource "aws_s3_bucket_ownership_controls" "app_bucket_acl_ownership" {
-#   bucket = aws_s3_bucket.app_bucket.id
-#   rule {
-#     # control_object_ownership = true
-#     object_ownership = "BucketOwnerPreferred"
-#   }
-#   # Add just this depends_on condition
-#   # depends_on = [aws_s3_bucket_acl.app_bucket_acl]
-# }
-# resource "aws_s3_bucket_acl" "app_bucket_acl" {
-#   bucket     = aws_s3_bucket.app_bucket.id
-#   acl        = "public-read"
-#   depends_on = [aws_s3_bucket_ownership_controls.app_bucket_acl_ownership]
-# }
 resource "aws_s3_bucket_ownership_controls" "app_bucket_acl_ownership" {
   bucket = aws_s3_bucket.app_bucket.id
   rule {
     object_ownership = "BucketOwnerPreferred"
   }
 }
+
 resource "aws_s3_bucket_public_access_block" "app_bucket_public_access" {
   bucket = aws_s3_bucket.app_bucket.id
 
@@ -38,6 +22,7 @@ resource "aws_s3_bucket_public_access_block" "app_bucket_public_access" {
   ignore_public_acls      = false
   restrict_public_buckets = false
 }
+
 resource "aws_s3_bucket_acl" "app_bucket_acl" {
   depends_on = [
     aws_s3_bucket_ownership_controls.app_bucket_acl_ownership,
@@ -54,10 +39,6 @@ resource "aws_s3_bucket_versioning" "app_bucket_versioning" {
     status = "Enabled"
   }
 }
-# resource "aws_s3_bucket_policy" "app_bucket_policy" {
-#   bucket = aws_s3_bucket.app_bucket.id
-#   policy = data.aws_iam_policy_document.app_bucket_policy.json
-# }
 
 resource "aws_s3_bucket_website_configuration" "app_bucket_website" {
   bucket = aws_s3_bucket.app_bucket.id
@@ -119,14 +100,3 @@ resource "aws_s3_object" "app_bucket_source" {
   acl          = "public-read"
   content_type = lookup(local.mime_types, regex("\\.[^.]+$", each.value), null)
 }
-
-# data "aws_iam_policy_document" "app_bucket_policy" {
-#   statement {
-#     actions   = ["s3:GetObject"]
-#     resources = ["${aws_s3_bucket.app_bucket.arn}/*"]
-#     principals {
-#       type        = "AWS"
-#       identifiers = ["*"]
-#     }
-#   }
-# }

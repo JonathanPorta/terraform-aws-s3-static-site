@@ -65,7 +65,8 @@ resource "aws_s3_bucket_website_configuration" "app_bucket_website" {
 }
 
 locals {
-  mime_types = jsondecode(file("${path.module}/mime.json"))
+  mime_types           = jsondecode(file("${path.module}/mime.json"))
+  provision_monitoring = var.monitoring == true ? 1 : 0
 }
 
 resource "aws_s3_object" "app_bucket_source" {
@@ -79,6 +80,7 @@ resource "aws_s3_object" "app_bucket_source" {
 }
 
 resource "betteruptime_monitor" "this" {
+  count             = local.provision_monitoring
   url               = "https://${var.hostname}"
   monitor_type      = "status"
   domain_expiration = 30

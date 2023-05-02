@@ -10,12 +10,14 @@ Very simple Terraform module for deploying a static site into an S3 bucket.
 | Name | Version |
 |------|---------|
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 4.8.0 |
+| <a name="requirement_betteruptime"></a> [betteruptime](#requirement\_betteruptime) | ~> 0.3.15 |
 
 ## Providers
 
 | Name | Version |
 |------|---------|
 | <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 4.8.0 |
+| <a name="provider_betteruptime"></a> [betteruptime](#provider\_betteruptime) | ~> 0.3.15 |
 
 ## Modules
 
@@ -32,6 +34,7 @@ No modules.
 | [aws_s3_bucket_versioning.app_bucket_versioning](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_versioning) | resource |
 | [aws_s3_bucket_website_configuration.app_bucket_website](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_website_configuration) | resource |
 | [aws_s3_object.app_bucket_source](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_object) | resource |
+| [betteruptime_monitor.this](https://registry.terraform.io/providers/BetterStackHQ/better-uptime/latest/docs/resources/monitor) | resource |
 
 ## Inputs
 
@@ -41,6 +44,7 @@ No modules.
 | <a name="input_error_document_key"></a> [error\_document\_key](#input\_error\_document\_key) | The optional name of the error document to use for the bucket. | `string` | `"index.html"` | no |
 | <a name="input_hostname"></a> [hostname](#input\_hostname) | The FQDN where this static site will be accessible. | `string` | n/a | yes |
 | <a name="input_index_document_suffix"></a> [index\_document\_suffix](#input\_index\_document\_suffix) | The optional name of the index document to use for the bucket. | `string` | `"index.html"` | no |
+| <a name="input_monitoring"></a> [monitoring](#input\_monitoring) | Whether or not to enable monitoring. | `bool` | `false` | no |
 | <a name="input_routing_rule_key_prefix_equals"></a> [routing\_rule\_key\_prefix\_equals](#input\_routing\_rule\_key\_prefix\_equals) | The optional key prefix to match. | `string` | `null` | no |
 | <a name="input_routing_rule_replace_key_with"></a> [routing\_rule\_replace\_key\_with](#input\_routing\_rule\_replace\_key\_with) | The optional name key to replace with. | `string` | `null` | no |
 | <a name="input_source_files"></a> [source\_files](#input\_source\_files) | A path to the website's source files. These will be uploaded to the bucket. | `string` | n/a | yes |

@@ -30,3 +30,9 @@ variable "error_document_key" {
   type        = string
   default     = "index.html"
 }
+variable "monitoring" {
+  description = "Whether or not to enable monitoring."
+  type        = bool
+  default     = false
+
+}

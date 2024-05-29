@@ -77,7 +77,7 @@ resource "aws_s3_object" "app_bucket_source" {
   source       = "${var.source_files}/${each.value}"
   etag         = filemd5("${var.source_files}/${each.value}")
   acl          = "public-read"
-  content_type = lookup(local.mime_types, regex("\\.[^.]+$", each.value), default_mime_type)
+  content_type = lookup(local.mime_types, regex("\\.[^.]+$", each.value), local.default_mime_type)
 }
 
 resource "betteruptime_monitor" "this" {

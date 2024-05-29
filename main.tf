@@ -65,6 +65,7 @@ resource "aws_s3_bucket_website_configuration" "app_bucket_website" {
 }
 
 locals {
+  default_mime_type    = "application/octet-stream"
   mime_types           = jsondecode(file("${path.module}/mime.json"))
   provision_monitoring = var.monitoring == true ? 1 : 0
 }
@@ -76,7 +77,7 @@ resource "aws_s3_object" "app_bucket_source" {
   source       = "${var.source_files}/${each.value}"
   etag         = filemd5("${var.source_files}/${each.value}")
   acl          = "public-read"
-  content_type = lookup(local.mime_types, regex("\\.[^.]+$", each.value), null)
+  content_type = lookup(local.mime_types, regex("\\.[^.]+$", each.value), default_mime_type)
 }
 
 resource "betteruptime_monitor" "this" {

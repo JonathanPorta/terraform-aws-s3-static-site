@@ -1,0 +1,133 @@
+name: 🏷️✨ Auto-Label PRs
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+env:
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+jobs:
+  auto-label:
+    name: Auto-Label Based on Branch Name
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🏷️ Apply labels based on branch name
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const branchName = context.payload.pull_request.head.ref;
+          const prNumber = context.payload.pull_request.number;
+
+          console.log(`Processing branch: ${branchName}`);
+
+          // Define label mappings based on branch patterns
+          const labelMappings = [
+            // User-specific patterns (jp/type/description)
+            { pattern: /^[^/]+\/b\//, labels: ['🐛 bug'] },
+            { pattern: /^[^/]+\/f\//, labels: ['✨ feature'] },
+            { pattern: /^[^/]+\/d\//, labels: ['📚 docs'] },
+            { pattern: /^[^/]+\/c\//, labels: ['🧹 chore'] },
+            { pattern: /^[^/]+\/fix\//, labels: ['🐛 bug'] },
+            { pattern: /^[^/]+\/feat\//, labels: ['✨ feature'] },
+            { pattern: /^[^/]+\/doc\//, labels: ['📚 docs'] },
+            { pattern: /^[^/]+\/chore\//, labels: ['🧹 chore'] },
+            { pattern: /^[^/]+\/refactor\//, labels: ['♻️ refactor'] },
+            { pattern: /^[^/]+\/test\//, labels: ['🧪 test'] },
+            { pattern: /^[^/]+\/perf\//, labels: ['⚡ performance'] },
+            { pattern: /^[^/]+\/security\//, labels: ['🔒 security'] },
+
+            // Standard patterns (without user prefix)
+            { pattern: /^bug\//, labels: ['🐛 bug'] },
+            { pattern: /^bugfix\//, labels: ['🐛 bug'] },
+            { pattern: /^fix\//, labels: ['🐛 bug'] },
+            { pattern: /^feature\//, labels: ['✨ feature'] },
+            { pattern: /^feat\//, labels: ['✨ feature'] },
+            { pattern: /^docs\//, labels: ['📚 docs'] },
+            { pattern: /^doc\//, labels: ['📚 docs'] },
+            { pattern: /^chore\//, labels: ['🧹 chore'] },
+            { pattern: /^refactor\//, labels: ['♻️ refactor'] },
+            { pattern: /^test\//, labels: ['🧪 test'] },
+            { pattern: /^tests\//, labels: ['🧪 test'] },
+            { pattern: /^perf\//, labels: ['⚡ performance'] },
+            { pattern: /^performance\//, labels: ['⚡ performance'] },
+            { pattern: /^security\//, labels: ['🔒 security'] },
+            { pattern: /^sec\//, labels: ['🔒 security'] },
+            { pattern: /^hotfix\//, labels: ['🚨 hotfix', '🐛 bug'] },
+            { pattern: /^release\//, labels: ['🚀 release'] },
+            { pattern: /^dependabot\//, labels: ['📦 dependencies'] },
+            { pattern: /^deps\//, labels: ['📦 dependencies'] },
+            { pattern: /^dependencies\//, labels: ['📦 dependencies'] },
+
+            // Content-based patterns
+            { pattern: /ci|pipeline|workflow|github/, labels: ['🔧 ci/cd'] },
+            { pattern: /config|configuration|settings/, labels: ['⚙️ config'] },
+            { pattern: /style|css|ui|ux/, labels: ['🎨 style'] },
+            { pattern: /api|endpoint|service/, labels: ['🔌 api'] },
+            { pattern: /database|db|migration/, labels: ['🗄️ database'] },
+          ];
+
+          // Find matching labels
+          const labelsToApply = new Set();
+
+          for (const mapping of labelMappings) {
+            if (mapping.pattern.test(branchName.toLowerCase())) {
+              mapping.labels.forEach(label => labelsToApply.add(label));
+            }
+          }
+
+          // Convert to array
+          const finalLabels = Array.from(labelsToApply);
+
+          if (finalLabels.length > 0) {
+            console.log(`Applying labels: ${finalLabels.join(', ')}`);
+
+            // Get current PR labels
+            const { data: currentPR } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+
+            const currentLabels = currentPR.labels.map(label => label.name);
+
+            // Only add labels that aren't already present
+            const newLabels = finalLabels.filter(label => !currentLabels.includes(label));
+
+            if (newLabels.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: newLabels
+              });
+
+              console.log(`✅ Added labels: ${newLabels.join(', ')}`);
+            } else {
+              console.log(`ℹ️ All relevant labels already applied`);
+            }
+          } else {
+            console.log(`ℹ️ No matching labels found for branch: ${branchName}`);
+          }
+
+    - name: 📢 Notify Slack
+      uses: ./.github/actions/slack-notify
+      with:
+        webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
+        status: ${{ job.status }}
+        environment: 'pr-automation'
+        workflow_name: ${{ github.workflow }}
+      if: always()

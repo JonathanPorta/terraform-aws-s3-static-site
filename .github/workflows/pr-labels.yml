@@ -1,0 +1,109 @@
+name: 🏷️ PR Label Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+env:
+  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+jobs:
+  validate-labels:
+    name: Validate Version Labels
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+
+    - name: 🏷️ Check for required version labels
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const { data: pullRequest } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number
+          });
+
+          const labels = pullRequest.labels.map(label => label.name);
+          const versionLabels = ['major', 'minor', 'patch'];
+          const hasVersionLabel = versionLabels.some(label => labels.includes(label));
+
+          if (!hasVersionLabel) {
+            const branchName = context.payload.pull_request.head.ref;
+            const suggestedLabel = branchName.includes('/f/') || branchName.includes('/feat') || branchName.includes('feature') ? 'minor' : 'patch';
+
+            const comment = `## 🏷️ Version Label Required
+
+            This PR needs a version label to determine the type of release:
+
+            - \`major\` - Breaking changes (e.g., 1.0.0 → 2.0.0)
+            - \`minor\` - New features (e.g., 1.0.0 → 1.1.0)
+            - \`patch\` - Bug fixes (e.g., 1.0.0 → 1.0.1)
+
+            **💡 Suggestion:** Based on your branch name \`${branchName}\`, this looks like a **${suggestedLabel}** release.
+
+            Please add one of these labels to this PR.`;
+
+            // Check if comment already exists
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existingComment = comments.find(comment =>
+              comment.body.includes('Version Label Required')
+            );
+
+            if (!existingComment) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+            core.setFailed('PR is missing a version label (major, minor, or patch)');
+          } else {
+            // Remove the comment if it exists and labels are now present
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existingComment = comments.find(comment =>
+              comment.body.includes('Version Label Required')
+            );
+
+            if (existingComment) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id
+              });
+            }
+
+            console.log(`✅ PR has version label: ${labels.filter(l => versionLabels.includes(l)).join(', ')}`);
+          }
+
+    - name: 📢 Notify Slack
+      uses: ./.github/actions/slack-notify
+      with:
+        webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
+        status: ${{ job.status }}
+        environment: 'pr-validation'
+        workflow_name: ${{ github.workflow }}
+      if: always()

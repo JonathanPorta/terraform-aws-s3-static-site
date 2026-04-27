@@ -86,33 +86,49 @@ runs:
         BRANCH_NAME="${GITHUB_REF_NAME}"
         RUN_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
-        # Build Slack message
-        MESSAGE=$(cat <<EOF
-        {
-          "attachments": [
-            {
-              "color": "$COLOR",
-              "fields": [
-                {
-                  "title": "$EMOJI $WORKFLOW_NAME",
-                  "value": "Status: *$STATUS*\nEnvironment: *$ENVIRONMENT*\nRepository: *$REPO_NAME*\nBranch: *$BRANCH_NAME*\nCommit: *$COMMIT_SHA*\n\n$COMMIT_MSG",
-                  "short": false
-                }
-              ],
-              "actions": [
-                {
-                  "type": "button",
-                  "text": "View Run",
-                  "url": "$RUN_URL"
-                }
-              ],
-              "footer": "GitHub Actions",
-              "ts": $(date +%s)
-            }
-          ]
-        }
-        EOF
-        )
+        # Build Slack message via `jq -n --arg ...` so commit messages, branch
+        # names, or workflow names containing quotes/newlines/backslashes
+        # cannot break the JSON payload or inject unintended structure.
+        if ! command -v jq >/dev/null 2>&1; then
+          echo "::error::jq is required to build the Slack payload safely. Install it on the runner."
+          echo "success=false" >> $GITHUB_OUTPUT
+          echo "attempts=0" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        MESSAGE=$(jq -n \
+          --arg color       "$COLOR" \
+          --arg title       "$EMOJI $WORKFLOW_NAME" \
+          --arg status      "$STATUS" \
+          --arg environment "$ENVIRONMENT" \
+          --arg repo        "$REPO_NAME" \
+          --arg branch      "$BRANCH_NAME" \
+          --arg commit_sha  "$COMMIT_SHA" \
+          --arg commit_msg  "$COMMIT_MSG" \
+          --arg run_url     "$RUN_URL" \
+          --argjson ts      "$(date +%s)" '
+          {
+            attachments: [{
+              color: $color,
+              fields: [{
+                title: $title,
+                value: ("Status: *\($status)*\n" +
+                        "Environment: *\($environment)*\n" +
+                        "Repository: *\($repo)*\n" +
+                        "Branch: *\($branch)*\n" +
+                        "Commit: *\($commit_sha)*\n\n" +
+                        $commit_msg),
+                short: false
+              }],
+              actions: [{
+                type: "button",
+                text: "View Run",
+                url: $run_url
+              }],
+              footer: "GitHub Actions",
+              ts: $ts
+            }]
+          }')
 
         # Function to send notification with retry logic
         send_notification() {
@@ -122,15 +138,20 @@ runs:
           while [[ $attempt -le $MAX_RETRIES ]]; do
             echo "Attempt $attempt/$MAX_RETRIES: Sending Slack notification..."
 
-            # Send request and capture response
-            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            # Capture response headers and body separately. Slack returns
+            # rate-limit info in the Retry-After HTTP header (per Slack docs),
+            # not the response body — so we need -D to dump headers to a file.
+            HEADERS_FILE="$(mktemp)"
+            BODY_FILE="$(mktemp)"
+            HTTP_CODE="$(curl -sS \
+              -D "$HEADERS_FILE" \
+              -o "$BODY_FILE" \
+              -w "%{http_code}" \
+              -X POST \
               -H "Content-Type: application/json" \
               -d "$MESSAGE" \
-              "$WEBHOOK_URL")
-
-            # Extract HTTP status code
-            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-            RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
+              "$WEBHOOK_URL")"
+            RESPONSE_BODY="$(cat "$BODY_FILE")"
 
             echo "HTTP Status: $HTTP_CODE"
 
@@ -138,16 +159,16 @@ runs:
               "200")
                 echo "✅ Slack notification sent successfully"
                 success=true
+                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
               "429")
                 echo "⚠️ Rate limited by Slack API"
 
-                # Try to extract Retry-After header from response
-                RETRY_AFTER=""
-                if command -v jq >/dev/null 2>&1 && [[ -n "$RESPONSE_BODY" ]]; then
-                  RETRY_AFTER=$(echo "$RESPONSE_BODY" | jq -r '.retry_after // empty' 2>/dev/null)
-                fi
+                # Per Slack docs, 429 carries a Retry-After header (in seconds).
+                # Header name is case-insensitive; tolower() handles both
+                # "Retry-After" and "retry-after". Strip any trailing CR.
+                RETRY_AFTER="$(awk 'BEGIN{IGNORECASE=1} /^retry-after:/ {print $2}' "$HEADERS_FILE" | tr -d '\r' | head -n1)"
 
                 if [[ -n "$RETRY_AFTER" && "$RETRY_AFTER" =~ ^[0-9]+$ ]]; then
                   DELAY=$RETRY_AFTER
@@ -161,6 +182,7 @@ runs:
                   echo "Using exponential backoff: ${DELAY}s"
                 fi
 
+                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 if [[ $attempt -lt $MAX_RETRIES ]]; then
                   echo "Waiting ${DELAY}s before retry..."
                   sleep "$DELAY"
@@ -169,18 +191,22 @@ runs:
               "400")
                 echo "❌ Bad request - check webhook URL and message format"
                 echo "Response: $RESPONSE_BODY"
+                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
               "403")
                 echo "❌ Forbidden - check webhook URL permissions"
+                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
               "404")
                 echo "❌ Webhook not found - check webhook URL"
+                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
               "500"|"502"|"503"|"504")
                 echo "⚠️ Server error (${HTTP_CODE}) - retrying..."
+                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 if [[ $attempt -lt $MAX_RETRIES ]]; then
                   DELAY=$((BASE_DELAY * (2 ** (attempt - 1))))
                   echo "Waiting ${DELAY}s before retry..."
@@ -190,6 +216,7 @@ runs:
               *)
                 echo "❌ Unexpected HTTP status: $HTTP_CODE"
                 echo "Response: $RESPONSE_BODY"
+                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
             esac

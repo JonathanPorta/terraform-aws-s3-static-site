@@ -2,6 +2,44 @@
 
 Very simple Terraform module for deploying a static site into an S3 bucket.
 
+## Public access
+
+This module **intentionally creates a public S3 website bucket**. Anonymous `s3:GetObject` is granted via:
+
+- A bucket policy with `Principal: "*"` (the modern, post-2023 AWS approach)
+- A bucket-level `public-read` ACL (legacy, retained for backwards compatibility)
+- Per-object `public-read` ACLs on every uploaded file (legacy, retained)
+
+If you don't want a publicly readable bucket, this module is the wrong tool — it's designed specifically for static website hosting where every object must be readable by anonymous clients.
+
+### Account-level / organization-level Block Public Access
+
+This module sets *bucket-level* `public_access_block` flags to `false`. **Account-level or organization-level S3 Block Public Access settings can still override that** and prevent the public-read bucket policy from being applied or taking effect, even after `terraform apply` reports success. If anonymous requests return `403` against an apparently-applied bucket, check:
+
+```bash
+# Account level (replace with your account id)
+aws s3control get-public-access-block --account-id 123456789012
+
+# Organization-level: your AWS Organizations admin will know.
+```
+
+If `BlockPublicPolicy` or `RestrictPublicBuckets` is `true` at account/org level, this module won't be able to make the bucket public until those flags are turned off.
+
+### This module owns the bucket policy
+
+S3 buckets have a single bucket-policy document. This module's `aws_s3_bucket_policy.app_bucket_public_read` resource will be the source of truth for that document — **do not attach a separate manual bucket policy** to buckets managed by this module, or your changes will be overwritten on the next `terraform apply`. If you need additional statements (e.g., a `DenyInsecureTransport` block), submit a PR or maintain a fork.
+
+### v2 roadmap (planned)
+
+Modern AWS guidance is to disable ACLs entirely (`object_ownership = "BucketOwnerEnforced"`) and rely on bucket policies as the sole access-control mechanism. A future v2 of this module will:
+
+- Switch ownership to `BucketOwnerEnforced`
+- Remove the `aws_s3_bucket_acl` resource
+- Remove `acl = "public-read"` from `aws_s3_object` resources
+- Rely entirely on `aws_s3_bucket_policy` for public access
+
+This is a breaking change requiring a Terraform state migration, which is why it's deferred to a major version bump.
+
 ## Module Documentation
 
 <!-- BEGIN_TF_DOCS -->

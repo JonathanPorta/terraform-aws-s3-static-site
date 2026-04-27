@@ -39,9 +39,12 @@ jobs:
     name: Check for pull request type label
     runs-on: ubuntu-latest
     steps:
+      # Label vocabulary aligned with .github/workflows/pr-auto-label.yml
+      # (the auto-labeler applies emoji-prefixed labels by branch convention).
+      # Any one of these from the auto-labeler set satisfies this gate.
       - uses: docker://agilepathway/pull-request-label-checker:latest
         with:
-          one_of: bug,enhancement,documentation,security
+          one_of: "🐛 bug,✨ feature,📚 docs,🔒 security,🔧 ci/cd,🧹 chore,♻️ refactor,🧪 test,⚡ performance,📦 dependencies,🚀 release,🚨 hotfix"
           repo_token: ${{ secrets.GITHUB_TOKEN }}
 
   docs:

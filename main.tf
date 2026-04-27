@@ -33,6 +33,37 @@ resource "aws_s3_bucket_acl" "app_bucket_acl" {
   acl    = "public-read"
 }
 
+# Public-read bucket policy. The ACL approach above (acl = "public-read") was
+# the canonical pattern when this module was first written, but AWS has been
+# progressively deprecating public-read ACLs since April 2023. New buckets
+# created today often have ACL-based public access silently fail at the
+# request level — the ACL applies but anonymous GetObject requests still
+# return 403. When this bucket is fronted by a CDN, that underlying S3 403
+# can surface as confusing edge/origin behavior during rollout.
+#
+# Adding an explicit aws_s3_bucket_policy is the modern, reliable equivalent.
+# Bucket policy + ACL coexist fine; the policy is what actually grants
+# public read in the post-2023 AWS world. depends_on the public-access-block
+# so the policy isn't rejected by a "block public policy" setting that races
+# with creation.
+resource "aws_s3_bucket_policy" "app_bucket_public_read" {
+  depends_on = [
+    aws_s3_bucket_public_access_block.app_bucket_public_access,
+  ]
+
+  bucket = aws_s3_bucket.app_bucket.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "PublicReadGetObject"
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.app_bucket.arn}/*"
+    }]
+  })
+}
+
 resource "aws_s3_bucket_versioning" "app_bucket_versioning" {
   bucket = aws_s3_bucket.app_bucket.id
   versioning_configuration {

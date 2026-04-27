@@ -1,0 +1,90 @@
+name: 🏷️ Setup Repository Labels
+
+on:
+  workflow_dispatch:
+  push:
+    # Run on either default-branch convention. Different repos in this
+    # portfolio use master (terraform-aws-s3-static-site) and main
+    # (jonathanportarealtor.com etc.) — same workflow file works in both
+    # without needing per-repo edits.
+    branches: [master, main]
+    paths:
+      - '.github/workflows/setup-labels.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  setup-labels:
+    name: Create Standard Labels
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+
+    steps:
+    - name: 🏷️ Create or update repository labels
+      uses: actions/github-script@v8
+      with:
+        script: |
+          const labels = [
+            // Standard labels
+            { name: '🐛 bug', color: 'dc2626', description: 'Something isn\'t working' },
+            { name: '✨ feature', color: '16a34a', description: 'New feature or enhancement' },
+            { name: '📚 docs', color: '2563eb', description: 'Documentation updates' },
+            { name: '🧹 chore', color: '6b7280', description: 'Maintenance tasks' },
+            { name: '♻️ refactor', color: 'eab308', description: 'Code refactoring' },
+            { name: '🧪 test', color: 'a855f7', description: 'Test-related changes' },
+            { name: '⚡ performance', color: 'f59e0b', description: 'Performance improvements' },
+            { name: '🔒 security', color: 'dc2626', description: 'Security-related changes' },
+            { name: '🚨 hotfix', color: 'dc2626', description: 'Critical bug fix' },
+            { name: '🚀 release', color: '059669', description: 'Release preparation' },
+            { name: '📦 dependencies', color: '0369a1', description: 'Dependency updates' },
+            { name: '🔧 ci/cd', color: '7c3aed', description: 'CI/CD pipeline changes' },
+            { name: '⚙️ config', color: '4b5563', description: 'Configuration changes' },
+            { name: '🎨 style', color: 'ec4899', description: 'UI/UX and styling' },
+            { name: '🔌 api', color: '059669', description: 'API-related changes' },
+            { name: '🗄️ database', color: '7c2d12', description: 'Database changes' },
+            // Deployment labels
+            { name: 'Development Deployment', color: '0d2002', description: 'Deployment to the Development environment' },
+            { name: 'Staging Deployment', color: '0d2002', description: 'Deployment to the Staging environment' },
+            { name: 'Production Deployment', color: '0d2002', description: 'Deployment to the Production environment' },
+            { name: 'DNS Deployment', color: '0d2002', description: 'Deployment of DNS and CDN rules to the Production Environment' },
+            // Version labels for releases
+            { name: 'major', color: 'd93f0b', description: 'Major version bump (breaking changes)' },
+            { name: 'minor', color: 'fbca04', description: 'Minor version bump (new features)' },
+            { name: 'patch', color: '0e8a16', description: 'Patch version bump (bug fixes)' },
+          ];
+
+          for (const label of labels) {
+            try {
+              // Try to update the label first
+              await github.rest.issues.updateLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label.name,
+                color: label.color,
+                description: label.description
+              });
+              console.log(`✅ Updated label: ${label.name}`);
+            } catch (error) {
+              if (error.status === 404) {
+                // Label doesn't exist, create it
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description
+                  });
+                  console.log(`✅ Created label: ${label.name}`);
+                } catch (createError) {
+                  console.error(`❌ Failed to create label ${label.name}:`, createError.message);
+                }
+              } else {
+                console.error(`❌ Failed to update label ${label.name}:`, error.message);
+              }
+            }
+          }
+
+          console.log('🎉 Label setup complete!');

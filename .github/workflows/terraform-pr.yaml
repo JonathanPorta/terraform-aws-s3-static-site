@@ -15,7 +15,7 @@ jobs:
     name: Validate Terraform formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
       - uses: hashicorp/setup-terraform@v2
 
       - name: Terraform Validate
@@ -39,15 +39,21 @@ jobs:
     name: Check for pull request type label
     runs-on: ubuntu-latest
     steps:
+      # Label vocabulary aligned with .github/workflows/pr-auto-label.yml
+      # (the auto-labeler applies emoji-prefixed labels by branch convention
+      # AND content-based heuristics, so PRs may legitimately have multiple
+      # type labels — e.g., a feature touching CI gets ✨ feature + 🔧 ci/cd).
+      # Use any_of so multiple matches don't fail the gate; one_of would
+      # require *exactly* one, which conflicts with the auto-labeler's design.
       - uses: docker://agilepathway/pull-request-label-checker:latest
         with:
-          one_of: bug,enhancement,documentation,security
+          any_of: "🐛 bug,✨ feature,📚 docs,🔒 security,🔧 ci/cd,🧹 chore,♻️ refactor,🧪 test,⚡ performance,📦 dependencies,🚀 release,🚨 hotfix,⚙️ config,🎨 style,🔌 api,🗄️ database"
           repo_token: ${{ secrets.GITHUB_TOKEN }}
 
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.pull_request.head.ref }}
 

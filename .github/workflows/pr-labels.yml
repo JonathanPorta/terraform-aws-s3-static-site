@@ -1,0 +1,112 @@
+name: 🏷️ PR Label Validation
+
+# Uses pull_request_target instead of pull_request so the workflow runs in
+# the context of the BASE branch, not the PR branch — PR-modified workflow
+# code or local composite actions cannot run with this token. Safe for
+# label-only metadata work; do NOT add code-build steps here without
+# carefully reviewing the implications.
+on:
+  pull_request_target:
+    types: [opened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege permissions: issues:write for labels and PR comments
+# (PRs are issues under the hood for those APIs). Slack notifications are
+# intentionally not part of this metadata workflow — keep PR-controlled
+# code paths away from the webhook secret.
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  validate-labels:
+    name: Validate Version Labels
+    runs-on: ubuntu-latest
+
+    steps:
+    # No actions/checkout — this workflow only needs PR metadata via the
+    # GitHub API. Skipping checkout means PR-controlled code never lands
+    # on this runner.
+    - name: 🏷️ Check for required version labels
+      uses: actions/github-script@v8
+      with:
+        script: |
+          const { data: pullRequest } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number
+          });
+
+          const labels = pullRequest.labels.map(label => label.name);
+          const versionLabels = ['major', 'minor', 'patch'];
+          const hasVersionLabel = versionLabels.some(label => labels.includes(label));
+
+          if (!hasVersionLabel) {
+            const branchName = context.payload.pull_request.head.ref;
+            const suggestedLabel = branchName.includes('/f/') || branchName.includes('/feat') || branchName.includes('feature') ? 'minor' : 'patch';
+
+            // Build the markdown comment without leading-indent on each
+            // line — the previous template literal carried the script's
+            // indentation through to the rendered comment, which Markdown
+            // would interpret as code blocks.
+            const comment = [
+              '## 🏷️ Version Label Required',
+              '',
+              'This PR needs a version label to determine the type of release:',
+              '',
+              '- `major` - Breaking changes (e.g., 1.0.0 → 2.0.0)',
+              '- `minor` - New features (e.g., 1.0.0 → 1.1.0)',
+              '- `patch` - Bug fixes (e.g., 1.0.0 → 1.0.1)',
+              '',
+              `**💡 Suggestion:** Based on your branch name \`${branchName}\`, this looks like a **${suggestedLabel}** release.`,
+              '',
+              'Please add one of these labels to this PR.',
+            ].join('\n');
+
+            // Check if comment already exists
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existingComment = comments.find(comment =>
+              comment.body.includes('Version Label Required')
+            );
+
+            if (!existingComment) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
+
+            core.setFailed('PR is missing a version label (major, minor, or patch)');
+          } else {
+            // Remove the comment if it exists and labels are now present
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const existingComment = comments.find(comment =>
+              comment.body.includes('Version Label Required')
+            );
+
+            if (existingComment) {
+              await github.rest.issues.deleteComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id
+              });
+            }
+
+            console.log(`✅ PR has version label: ${labels.filter(l => versionLabels.includes(l)).join(', ')}`);
+          }

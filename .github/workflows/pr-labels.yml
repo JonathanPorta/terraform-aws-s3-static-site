@@ -43,17 +43,23 @@ jobs:
             const branchName = context.payload.pull_request.head.ref;
             const suggestedLabel = branchName.includes('/f/') || branchName.includes('/feat') || branchName.includes('feature') ? 'minor' : 'patch';
 
-            const comment = `## 🏷️ Version Label Required
-
-            This PR needs a version label to determine the type of release:
-
-            - \`major\` - Breaking changes (e.g., 1.0.0 → 2.0.0)
-            - \`minor\` - New features (e.g., 1.0.0 → 1.1.0)
-            - \`patch\` - Bug fixes (e.g., 1.0.0 → 1.0.1)
-
-            **💡 Suggestion:** Based on your branch name \`${branchName}\`, this looks like a **${suggestedLabel}** release.
-
-            Please add one of these labels to this PR.`;
+            // Build the markdown comment without leading-indent on each
+            // line — the previous template literal carried the script's
+            // indentation through to the rendered comment, which Markdown
+            // would interpret as code blocks.
+            const comment = [
+              '## 🏷️ Version Label Required',
+              '',
+              'This PR needs a version label to determine the type of release:',
+              '',
+              '- `major` - Breaking changes (e.g., 1.0.0 → 2.0.0)',
+              '- `minor` - New features (e.g., 1.0.0 → 1.1.0)',
+              '- `patch` - Bug fixes (e.g., 1.0.0 → 1.0.1)',
+              '',
+              `**💡 Suggestion:** Based on your branch name \`${branchName}\`, this looks like a **${suggestedLabel}** release.`,
+              '',
+              'Please add one of these labels to this PR.',
+            ].join('\n');
 
             // Check if comment already exists
             const { data: comments } = await github.rest.issues.listComments({

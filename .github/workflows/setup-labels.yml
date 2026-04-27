@@ -3,7 +3,11 @@ name: 🏷️ Setup Repository Labels
 on:
   workflow_dispatch:
   push:
-    branches: [ master ]
+    # Run on either default-branch convention. Different repos in this
+    # portfolio use master (terraform-aws-s3-static-site) and main
+    # (jonathanportarealtor.com etc.) — same workflow file works in both
+    # without needing per-repo edits.
+    branches: [master, main]
     paths:
       - '.github/workflows/setup-labels.yml'
 
@@ -15,7 +19,7 @@ jobs:
   setup-labels:
     name: Create Standard Labels
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
 
     steps:
     - name: 🏷️ Create or update repository labels

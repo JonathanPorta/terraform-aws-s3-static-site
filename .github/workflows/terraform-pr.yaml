@@ -40,11 +40,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Label vocabulary aligned with .github/workflows/pr-auto-label.yml
-      # (the auto-labeler applies emoji-prefixed labels by branch convention).
-      # Any one of these from the auto-labeler set satisfies this gate.
+      # (the auto-labeler applies emoji-prefixed labels by branch convention
+      # AND content-based heuristics, so PRs may legitimately have multiple
+      # type labels — e.g., a feature touching CI gets ✨ feature + 🔧 ci/cd).
+      # Use any_of so multiple matches don't fail the gate; one_of would
+      # require *exactly* one, which conflicts with the auto-labeler's design.
       - uses: docker://agilepathway/pull-request-label-checker:latest
         with:
-          one_of: "🐛 bug,✨ feature,📚 docs,🔒 security,🔧 ci/cd,🧹 chore,♻️ refactor,🧪 test,⚡ performance,📦 dependencies,🚀 release,🚨 hotfix"
+          any_of: "🐛 bug,✨ feature,📚 docs,🔒 security,🔧 ci/cd,🧹 chore,♻️ refactor,🧪 test,⚡ performance,📦 dependencies,🚀 release,🚨 hotfix,⚙️ config,🎨 style,🔌 api,🗄️ database"
           repo_token: ${{ secrets.GITHUB_TOKEN }}
 
   docs:

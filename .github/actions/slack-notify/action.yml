@@ -130,28 +130,59 @@ runs:
             }]
           }')
 
-        # Function to send notification with retry logic
+        # Function to send notification with retry logic.
         send_notification() {
           local attempt=1
+          local attempts_made=0    # tracks real attempt count for the output
           local success=false
 
+          # Tempfile lifecycle: create once outside the loop, allocate fresh
+          # paths per iteration, and trap-clean on any exit (including
+          # `set -e` triggered by curl). This prevents leaks if the script
+          # is killed mid-iteration.
+          local HEADERS_FILE=""
+          local BODY_FILE=""
+          # shellcheck disable=SC2064
+          trap 'rm -f "$HEADERS_FILE" "$BODY_FILE"' RETURN INT TERM
+
           while [[ $attempt -le $MAX_RETRIES ]]; do
+            attempts_made=$attempt
             echo "Attempt $attempt/$MAX_RETRIES: Sending Slack notification..."
+
+            HEADERS_FILE="$(mktemp)"
+            BODY_FILE="$(mktemp)"
 
             # Capture response headers and body separately. Slack returns
             # rate-limit info in the Retry-After HTTP header (per Slack docs),
             # not the response body — so we need -D to dump headers to a file.
-            HEADERS_FILE="$(mktemp)"
-            BODY_FILE="$(mktemp)"
+            #
+            # Capture curl's exit code without letting `set -e` abort the loop
+            # on transient failures (DNS, TLS, TCP timeout, etc.). --max-time
+            # bounds the request so we can't hang the runner.
+            HTTP_CODE=""
+            CURL_EXIT=0
             HTTP_CODE="$(curl -sS \
+              --connect-timeout 10 \
+              --max-time 30 \
               -D "$HEADERS_FILE" \
               -o "$BODY_FILE" \
               -w "%{http_code}" \
               -X POST \
               -H "Content-Type: application/json" \
               -d "$MESSAGE" \
-              "$WEBHOOK_URL")"
-            RESPONSE_BODY="$(cat "$BODY_FILE")"
+              "$WEBHOOK_URL")" || CURL_EXIT=$?
+            RESPONSE_BODY="$(cat "$BODY_FILE" 2>/dev/null || true)"
+
+            if [[ $CURL_EXIT -ne 0 ]]; then
+              echo "⚠️ curl failed with exit $CURL_EXIT (network/timeout); will retry if attempts remain"
+              if [[ $attempt -lt $MAX_RETRIES ]]; then
+                DELAY=$((BASE_DELAY * (2 ** (attempt - 1))))
+                echo "Waiting ${DELAY}s before retry..."
+                sleep "$DELAY"
+              fi
+              ((attempt++))
+              continue
+            fi
 
             echo "HTTP Status: $HTTP_CODE"
 
@@ -159,15 +190,14 @@ runs:
               "200")
                 echo "✅ Slack notification sent successfully"
                 success=true
-                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
               "429")
                 echo "⚠️ Rate limited by Slack API"
 
                 # Per Slack docs, 429 carries a Retry-After header (in seconds).
-                # Header name is case-insensitive; tolower() handles both
-                # "Retry-After" and "retry-after". Strip any trailing CR.
+                # IGNORECASE handles both "Retry-After" and "retry-after". Strip
+                # any trailing CR from the HTTP/1.1 line ending.
                 RETRY_AFTER="$(awk 'BEGIN{IGNORECASE=1} /^retry-after:/ {print $2}' "$HEADERS_FILE" | tr -d '\r' | head -n1)"
 
                 if [[ -n "$RETRY_AFTER" && "$RETRY_AFTER" =~ ^[0-9]+$ ]]; then
@@ -182,7 +212,6 @@ runs:
                   echo "Using exponential backoff: ${DELAY}s"
                 fi
 
-                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 if [[ $attempt -lt $MAX_RETRIES ]]; then
                   echo "Waiting ${DELAY}s before retry..."
                   sleep "$DELAY"
@@ -191,22 +220,18 @@ runs:
               "400")
                 echo "❌ Bad request - check webhook URL and message format"
                 echo "Response: $RESPONSE_BODY"
-                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
               "403")
                 echo "❌ Forbidden - check webhook URL permissions"
-                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
               "404")
                 echo "❌ Webhook not found - check webhook URL"
-                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
               "500"|"502"|"503"|"504")
                 echo "⚠️ Server error (${HTTP_CODE}) - retrying..."
-                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 if [[ $attempt -lt $MAX_RETRIES ]]; then
                   DELAY=$((BASE_DELAY * (2 ** (attempt - 1))))
                   echo "Waiting ${DELAY}s before retry..."
@@ -216,7 +241,6 @@ runs:
               *)
                 echo "❌ Unexpected HTTP status: $HTTP_CODE"
                 echo "Response: $RESPONSE_BODY"
-                rm -f "$HEADERS_FILE" "$BODY_FILE"
                 break
                 ;;
             esac
@@ -224,9 +248,11 @@ runs:
             ((attempt++))
           done
 
-          # Set outputs
+          # Set outputs — use the actual count (attempts_made), which is
+          # written before any break/continue so success-on-first-try reports
+          # attempts=1 (not 0).
           echo "success=$success" >> $GITHUB_OUTPUT
-          echo "attempts=$((attempt-1))" >> $GITHUB_OUTPUT
+          echo "attempts=$attempts_made" >> $GITHUB_OUTPUT
 
           if [[ "$success" != "true" ]]; then
             echo "::error::Failed to send Slack notification after $((attempt-1)) attempts"

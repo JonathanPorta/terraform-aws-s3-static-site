@@ -38,8 +38,8 @@ resource "aws_s3_bucket_acl" "app_bucket_acl" {
 # progressively deprecating public-read ACLs since April 2023. New buckets
 # created today often have ACL-based public access silently fail at the
 # request level — the ACL applies but anonymous GetObject requests still
-# return 403, which surfaces as Cloudflare error 522 ("connection to origin")
-# when the bucket is fronted by Cloudflare with SSL set to flexible.
+# return 403. When this bucket is fronted by a CDN, that underlying S3 403
+# can surface as confusing edge/origin behavior during rollout.
 #
 # Adding an explicit aws_s3_bucket_policy is the modern, reliable equivalent.
 # Bucket policy + ACL coexist fine; the policy is what actually grants

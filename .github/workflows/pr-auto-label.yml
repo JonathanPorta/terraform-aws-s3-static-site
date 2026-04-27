@@ -1,20 +1,26 @@
 name: 🏷️✨ Auto-Label PRs
 
+# Uses pull_request_target instead of pull_request so the workflow runs in
+# the context of the BASE branch, not the PR branch — PR-modified workflow
+# code or local composite actions cannot run with this token. Safe for
+# label-only metadata work; do NOT add code-build steps here without
+# carefully reviewing the implications.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege permissions: issues:write covers labels (PRs are issues
+# under the hood for the labels API). Slack notifications are intentionally
+# not part of this metadata workflow — keep PR-controlled code paths away
+# from the webhook secret.
 permissions:
   contents: read
   issues: write
-  pull-requests: write
-
-env:
-  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+  pull-requests: read
 
 jobs:
   auto-label:
@@ -22,11 +28,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: 📥 Checkout repository
-      uses: actions/checkout@v4
-
+    # No actions/checkout — this workflow only needs PR metadata via the
+    # GitHub API. Skipping checkout means PR-controlled code never lands
+    # on this runner.
     - name: 🏷️ Apply labels based on branch name
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const branchName = context.payload.pull_request.head.ref;
@@ -122,12 +128,3 @@ jobs:
           } else {
             console.log(`ℹ️ No matching labels found for branch: ${branchName}`);
           }
-
-    - name: 📢 Notify Slack
-      uses: ./.github/actions/slack-notify
-      with:
-        webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
-        status: ${{ job.status }}
-        environment: 'pr-automation'
-        workflow_name: ${{ github.workflow }}
-      if: always()

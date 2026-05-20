@@ -29,6 +29,23 @@ If `BlockPublicPolicy` or `RestrictPublicBuckets` is `true` at account/org level
 
 S3 buckets have a single bucket-policy document. This module's `aws_s3_bucket_policy.app_bucket_public_read` resource will be the source of truth for that document — **do not attach a separate manual bucket policy** to buckets managed by this module, or your changes will be overwritten on the next `terraform apply`. If you need additional statements (e.g., a `DenyInsecureTransport` block), submit a PR or maintain a fork.
 
+### Content-Type drift detection
+
+The `aws_s3_object` resource's `etag` attribute is what Terraform uses to decide whether a file needs to be re-uploaded. By default Terraform sets it to `filemd5(...)`, which means changes to the file *contents* trigger a re-upload but changes to derived metadata (like `content_type`) do not.
+
+This module composes the etag from **both** the file md5 and the derived content type:
+
+```hcl
+etag = md5(join("|", [
+  filemd5(...),
+  local.source_content_types[each.value]
+]))
+```
+
+That way, if the mime mapping changes (e.g. the module ships a new entry in `mime.json`, or you upgrade from an older module version that defaulted JPGs to `application/octet-stream`), the next `terraform apply` re-uploads the affected objects with the correct `Content-Type` header.
+
+The first `terraform apply` after upgrading to a module version that includes this fix will re-upload **every** existing object once, even if its content type is already correct. Subsequent applies are no-ops.
+
 ### v2 roadmap (planned)
 
 Modern AWS guidance is to disable ACLs entirely (`object_ownership = "BucketOwnerEnforced"`) and rely on bucket policies as the sole access-control mechanism. A future v2 of this module will:

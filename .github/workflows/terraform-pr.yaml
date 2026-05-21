@@ -7,8 +7,6 @@ on:
       - opened
       - synchronize
       - reopened
-      - labeled
-      - unlabeled
 
 jobs:
   validate_formatting:
@@ -26,29 +24,20 @@ jobs:
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
-  check_semver_label:
-    name: Check for semantic version label
-    runs-on: ubuntu-latest
-    steps:
-      - uses: docker://agilepathway/pull-request-label-checker:latest
-        with:
-          one_of: major,minor,patch
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-
-  check_pull_request_type:
-    name: Check for pull request type label
-    runs-on: ubuntu-latest
-    steps:
-      # Label vocabulary aligned with .github/workflows/pr-auto-label.yml
-      # (the auto-labeler applies emoji-prefixed labels by branch convention
-      # AND content-based heuristics, so PRs may legitimately have multiple
-      # type labels — e.g., a feature touching CI gets ✨ feature + 🔧 ci/cd).
-      # Use any_of so multiple matches don't fail the gate; one_of would
-      # require *exactly* one, which conflicts with the auto-labeler's design.
-      - uses: docker://agilepathway/pull-request-label-checker:latest
-        with:
-          any_of: "🐛 bug,✨ feature,📚 docs,🔒 security,🔧 ci/cd,🧹 chore,♻️ refactor,🧪 test,⚡ performance,📦 dependencies,🚀 release,🚨 hotfix,⚙️ config,🎨 style,🔌 api,🗄️ database"
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
+  # Note: the `Check for semantic version label` and `Check for pull
+  # request type label` jobs that used to live here have been removed.
+  # They duplicated what .github/workflows/pr-labels.yml and
+  # pr-auto-label.yml already do, but worse — they used the
+  # agilepathway/pull-request-label-checker Docker action that fails
+  # with no PR comment, while pr-labels.yml posts a helpful comment
+  # suggesting a label based on branch name. With both running, a
+  # missing semver label produced two failed checks and one comment —
+  # one of those failed checks was just visual noise.
+  #
+  # When this repo migrates to the JonathanPorta/blessed-cicd reusable
+  # PR-labels workflow, pr-labels.yml + pr-auto-label.yml get replaced
+  # by a single caller too. Tracked in the blessed-cicd vendoring
+  # tracker issue.
 
   docs:
     runs-on: ubuntu-latest

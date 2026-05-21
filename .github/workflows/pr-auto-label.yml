@@ -2,7 +2,13 @@ name: 🏷️✨ Auto-Label PRs
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # Includes `unlabeled` so the auto-labeler re-applies the type label
+    # when someone removes it. This makes the labeler authoritative for
+    # type labels: change the branch name (or the mapping table below)
+    # to override, but ad-hoc label removal doesn't stick.
+    # `labeled` is included for symmetry; adding a label is a no-op when
+    # the same label is already applied.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

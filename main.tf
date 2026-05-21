@@ -99,20 +99,37 @@ locals {
   default_mime_type    = "application/octet-stream"
   mime_types           = jsondecode(file("${path.module}/mime.json"))
   provision_monitoring = var.monitoring == true ? 1 : 0
+  source_file_paths    = fileset(var.source_files, "**")
+  # Map every source file to the content type derived from its extension.
+  # Computed once here so the same value drives both `aws_s3_object.content_type`
+  # and the change-detection etag below.
+  source_content_types = {
+    for f in local.source_file_paths : f => (
+      length(regexall("\\.[^.]+$", f)) > 0 ?
+      lookup(local.mime_types, regex("\\.[^.]+$", f), local.default_mime_type) :
+      local.default_mime_type
+    )
+  }
 }
 
 resource "aws_s3_object" "app_bucket_source" {
-  for_each = fileset(var.source_files, "**")
+  for_each = local.source_file_paths
   bucket   = aws_s3_bucket.app_bucket.id
   key      = each.value
   source   = "${var.source_files}/${each.value}"
-  etag     = filemd5("${var.source_files}/${each.value}")
-  acl      = "public-read"
-  content_type = (
-    length(regexall("\\.[^.]+$", each.value)) > 0 ?
-    lookup(local.mime_types, regex("\\.[^.]+$", each.value), local.default_mime_type) :
-    local.default_mime_type
-  )
+  # Compose the file md5 with the derived content_type so a change to the
+  # mime mapping (e.g. this module ships a new mime.json entry) forces a
+  # re-upload, even when the underlying bytes are unchanged. Without this,
+  # objects originally uploaded under an older module version stay stuck
+  # with their original content_type (often application/octet-stream),
+  # which breaks downstream features that depend on a correct MIME type
+  # (e.g. social-card image previews on iMessage / Facebook / Slack).
+  etag = md5(join("|", [
+    filemd5("${var.source_files}/${each.value}"),
+    local.source_content_types[each.value]
+  ]))
+  acl          = "public-read"
+  content_type = local.source_content_types[each.value]
 }
 
 resource "betteruptime_monitor" "this" {

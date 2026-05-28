@@ -130,6 +130,17 @@ resource "aws_s3_object" "app_bucket_source" {
   ]))
   acl          = "public-read"
   content_type = local.source_content_types[each.value]
+
+  # Order uploads AFTER the ownership control (re-enables ACLs) and the public-
+  # access block (permits public ACLs). On a brand-new bucket these objects
+  # otherwise upload in parallel and race ahead of those settings, failing with
+  # "AccessControlListNotSupported: The bucket does not allow ACLs" until a
+  # second apply. (Dropping the object ACL entirely — making this depends_on
+  # unnecessary — is the v2 roadmap item; see README.)
+  depends_on = [
+    aws_s3_bucket_ownership_controls.app_bucket_acl_ownership,
+    aws_s3_bucket_public_access_block.app_bucket_public_access,
+  ]
 }
 
 resource "betteruptime_monitor" "this" {

@@ -27,7 +27,67 @@ If `BlockPublicPolicy` or `RestrictPublicBuckets` is `true` at account/org level
 
 ### This module owns the bucket policy
 
-S3 buckets have a single bucket-policy document. This module's `aws_s3_bucket_policy.app_bucket_public_read` resource will be the source of truth for that document — **do not attach a separate manual bucket policy** to buckets managed by this module, or your changes will be overwritten on the next `terraform apply`. If you need additional statements (e.g., a `DenyInsecureTransport` block), submit a PR or maintain a fork.
+S3 buckets have a single bucket-policy document. This module's `aws_s3_bucket_policy.app_bucket_public_read` resource will be the source of truth for that document — **do not attach a separate manual bucket policy** to buckets managed by this module, or your changes will be overwritten on the next `terraform apply`.
+
+That overwrite is a genuinely dangerous failure mode when the out-of-band statement is a *security control*: it applies cleanly, appears to work, and is then silently reverted by an unrelated apply — removing the control with no signal, at exactly the moment you believe it is protecting you.
+
+Since **1.5.0** you no longer need a fork. Contribute statements through `extra_policy_documents`:
+
+```hcl
+data "aws_iam_policy_document" "deny_insecure_transport" {
+  statement {
+    sid       = "DenyInsecureTransport"
+    effect    = "Deny"
+    actions   = ["s3:*"]
+    resources = [
+      "arn:aws:s3:::www.example.com",
+      "arn:aws:s3:::www.example.com/*",
+    ]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+}
+
+module "static_website" {
+  source  = "JonathanPorta/s3-static-site/aws"
+  version = "1.5.0"
+  # ...
+
+  extra_policy_documents = [
+    data.aws_iam_policy_document.deny_insecure_transport.json,
+  ]
+}
+```
+
+The module still owns the single `aws_s3_bucket_policy` resource; your documents are merged into it through **`override_policy_documents`**, which gives the merge semantics you want:
+
+| your document's `Sid` | result |
+|---|---|
+| unique | appended to the policy |
+| `PublicReadGetObject` | **replaces** the module's built-in statement |
+
+Caller documents cannot go in `source_policy_documents`: duplicate Sids there are a hard provider error (`duplicate Sid (PublicReadGetObject) in source_policy_documents`), so the "reuse the Sid to replace it" path would fail at plan time.
+
+**What `aws_iam_policy_document` does and does not do for you.** It gives you structured HCL and deterministic JSON composition. It does **not** validate IAM semantics — a nonexistent action, a malformed resource ARN, an invented principal type, or an unknown condition operator all render successfully and are rejected later by **AWS**, when the policy is applied. Do not treat a clean plan as evidence that a policy is valid.
+
+Both merge behaviours are covered by `tests/assert-composition.sh`, which runs against the module's pinned provider on CI.
+
+Because the bucket ARN is an output of this module, referencing it inside a document you pass *in* would be circular. Construct the ARN from the hostname instead — `arn:aws:s3:::${var.hostname}` — since the bucket is named for its hostname.
+
+### Upgrading from 1.4.0
+
+With `extra_policy_documents` unset, the rendered policy is **semantically equivalent** to 1.4.0 and the `aws_s3_bucket_policy` resource address is unchanged, so no replacement or state-address churn is expected.
+
+It is *not* byte-for-byte identical: the data source's rendered JSON differs from the previous `jsonencode` output, so expect at most a one-time in-place policy update on first apply.
 
 ### Content-Type drift detection
 
@@ -57,20 +117,39 @@ Modern AWS guidance is to disable ACLs entirely (`object_ownership = "BucketOwne
 
 This is a breaking change requiring a Terraform state migration, which is why it's deferred to a major version bump.
 
+## Development
+
+Three checks run on every PR, and all three are runnable locally:
+
+```sh
+bash tests/assert-composition.sh        # bucket-policy merge semantics, against the pinned provider
+bash tests/assert-actions-pinned.sh     # every third-party GitHub Action is pinned to a commit SHA
+bash tests/next-version.sh --self-test  # the arithmetic that names a release
+bash tests/render-docs.sh               # regenerate the block below, then commit the result
+```
+
+Releases are cut by `.github/workflows/terraform-publish.yaml` from the merged PR's `major` / `minor` /
+`patch` label. `bash tests/next-version.sh minor` prints the tag that would produce.
+
+`render-docs.sh` is a step you have to remember, because CI checks the rendered README rather than
+pushing it for you. That is deliberate: the action that used to push it delegated to a mutable
+container tag and held write access to the branch under review. A README that changed because an
+input's contract changed belongs in the diff a reviewer reads, not in a commit CI appends afterwards.
+
 ## Module Documentation
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 4.8.0 |
 | <a name="requirement_betteruptime"></a> [betteruptime](#requirement\_betteruptime) | ~> 0.3.15 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 4.8.0 |
 | <a name="provider_betteruptime"></a> [betteruptime](#provider\_betteruptime) | ~> 0.3.15 |
 
@@ -81,7 +160,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [aws_s3_bucket.app_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket_acl.app_bucket_acl](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_acl) | resource |
 | [aws_s3_bucket_ownership_controls.app_bucket_acl_ownership](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_ownership_controls) | resource |
@@ -91,13 +170,16 @@ No modules.
 | [aws_s3_bucket_website_configuration.app_bucket_website](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_website_configuration) | resource |
 | [aws_s3_object.app_bucket_source](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_object) | resource |
 | [betteruptime_monitor.this](https://registry.terraform.io/providers/BetterStackHQ/better-uptime/latest/docs/resources/monitor) | resource |
+| [aws_iam_policy_document.app_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.app_bucket_public_read](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_environment"></a> [environment](#input\_environment) | The name of the environment that this static site belongs to. e.g. [staging, production] | `string` | n/a | yes |
 | <a name="input_error_document_key"></a> [error\_document\_key](#input\_error\_document\_key) | The optional name of the error document to use for the bucket. | `string` | `"index.html"` | no |
+| <a name="input_extra_policy_documents"></a> [extra\_policy\_documents](#input\_extra\_policy\_documents) | Additional IAM policy documents to compose into this bucket's single policy,<br/>as rendered JSON — typically `data.aws_iam_policy_document.<name>.json`.<br/><br/>A bucket has exactly one policy and this module owns it, so a consumer cannot<br/>declare a second `aws_s3_bucket_policy`, and must not apply one out of band<br/>(the next apply would silently revert it). Contribute statements here instead.<br/><br/>Authoring them as `aws_iam_policy_document` data sources gives you structured<br/>HCL and deterministic JSON composition. It does NOT validate IAM semantics:<br/>unknown actions, malformed resources, invented principal types, and unknown<br/>condition operators all render fine and are rejected later by AWS, when the<br/>policy is applied.<br/><br/>Supplied to `override_policy_documents`, so a document with a unique Sid is<br/>appended and one reusing `PublicReadGetObject` replaces the built-in<br/>statement. (They cannot go in `source_policy_documents`: duplicate Sids there<br/>are a hard provider error.)<br/><br/>Default `[]` yields a policy semantically equivalent to pre-1.5.0 and leaves<br/>the `aws_s3_bucket_policy` resource address unchanged, so no replacement or<br/>state-address churn is expected. The rendered JSON is not byte-for-byte<br/>identical to the previous `jsonencode` output. | `list(string)` | `[]` | no |
 | <a name="input_hostname"></a> [hostname](#input\_hostname) | The FQDN where this static site will be accessible. | `string` | n/a | yes |
 | <a name="input_index_document_suffix"></a> [index\_document\_suffix](#input\_index\_document\_suffix) | The optional name of the index document to use for the bucket. | `string` | `"index.html"` | no |
 | <a name="input_monitoring"></a> [monitoring](#input\_monitoring) | Whether or not to enable monitoring. | `bool` | `false` | no |
@@ -108,7 +190,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_bucket"></a> [bucket](#output\_bucket) | The name of the bucket that will server this site. |
 | <a name="output_bucket_fqdn"></a> [bucket\_fqdn](#output\_bucket\_fqdn) | The FQDN of the bucket that will serve this static site. |
 | <a name="output_environment"></a> [environment](#output\_environment) | The environment that this static site belongs to. |

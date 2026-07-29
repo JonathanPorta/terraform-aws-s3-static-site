@@ -33,6 +33,8 @@ resource "aws_s3_bucket_acl" "app_bucket_acl" {
   acl    = "public-read"
 }
 
+# ── Bucket policy ────────────────────────────────────────────────────────────
+#
 # Public-read bucket policy. The ACL approach above (acl = "public-read") was
 # the canonical pattern when this module was first written, but AWS has been
 # progressively deprecating public-read ACLs since April 2023. New buckets
@@ -46,22 +48,69 @@ resource "aws_s3_bucket_acl" "app_bucket_acl" {
 # public read in the post-2023 AWS world. depends_on the public-access-block
 # so the policy isn't rejected by a "block public policy" setting that races
 # with creation.
+#
+# COMPOSING ADDITIONAL STATEMENTS
+#
+# A bucket has exactly ONE policy, and `aws_s3_bucket_policy` REPLACES it — it
+# does not append. A consumer that needs extra statements (a write-once prefix,
+# a per-principal confinement) therefore cannot add a second
+# `aws_s3_bucket_policy` resource, and must not apply one out of band: the next
+# `terraform apply` would silently revert it, removing the control with no
+# signal. That failure mode is worst exactly where these statements matter most.
+#
+# So the policy is composed here instead. The module keeps sole ownership of the
+# resource; consumers contribute statements through `var.extra_policy_documents`.
+#
+# WHAT THE PROVIDER DOES AND DOES NOT CHECK
+#
+# `aws_iam_policy_document` gives callers structured HCL and deterministic JSON
+# composition. It does NOT validate IAM semantics: a nonexistent action, a
+# malformed resource, an invented principal type, or an unknown condition
+# operator all render successfully and fail later, at AWS, during the resource
+# operation. AWS remains the authority on whether a policy means anything.
+data "aws_iam_policy_document" "app_bucket_public_read" {
+  statement {
+    sid       = "PublicReadGetObject"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.app_bucket.arn}/*"]
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+  }
+}
+
+# SOURCE vs OVERRIDE — this distinction is load-bearing, not stylistic.
+#
+# Documents merged through `source_policy_documents` must have mutually unique
+# Sids: the pinned provider (v4.8.0) hard-errors with
+# `duplicate Sid (PublicReadGetObject) in source_policy_documents`. So putting
+# caller documents there would make the documented "reuse the Sid to replace the
+# built-in statement" path fail at PLAN time — a public API promise the module
+# could not keep.
+#
+# `override_policy_documents` has the merge semantics actually wanted: a
+# statement with a unique Sid is appended, and one reusing an earlier Sid
+# REPLACES it. Hence built-in as the source, callers as overrides.
+#
+# Verified against provider 4.8.0 by tests/policy-composition.
+data "aws_iam_policy_document" "app_bucket" {
+  source_policy_documents   = [data.aws_iam_policy_document.app_bucket_public_read.json]
+  override_policy_documents = var.extra_policy_documents
+}
+
+# NOTE: the resource address is unchanged (`app_bucket_public_read`) so existing
+# state does not churn on upgrade. Its name now understates what it holds; the
+# rename is deliberately deferred to avoid a destroy/create on every consumer.
 resource "aws_s3_bucket_policy" "app_bucket_public_read" {
   depends_on = [
     aws_s3_bucket_public_access_block.app_bucket_public_access,
   ]
 
   bucket = aws_s3_bucket.app_bucket.id
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid       = "PublicReadGetObject"
-      Effect    = "Allow"
-      Principal = "*"
-      Action    = "s3:GetObject"
-      Resource  = "${aws_s3_bucket.app_bucket.arn}/*"
-    }]
-  })
+  policy = data.aws_iam_policy_document.app_bucket.json
 }
 
 resource "aws_s3_bucket_versioning" "app_bucket_versioning" {

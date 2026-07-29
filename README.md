@@ -122,10 +122,14 @@ This is a breaking change requiring a Terraform state migration, which is why it
 Three checks run on every PR, and all three are runnable locally:
 
 ```sh
-bash tests/assert-composition.sh      # bucket-policy merge semantics, against the pinned provider
-bash tests/assert-actions-pinned.sh   # every third-party GitHub Action is pinned to a commit SHA
-bash tests/render-docs.sh             # regenerate the block below, then commit the result
+bash tests/assert-composition.sh        # bucket-policy merge semantics, against the pinned provider
+bash tests/assert-actions-pinned.sh     # every third-party GitHub Action is pinned to a commit SHA
+bash tests/next-version.sh --self-test  # the arithmetic that names a release
+bash tests/render-docs.sh               # regenerate the block below, then commit the result
 ```
+
+Releases are cut by `.github/workflows/terraform-publish.yaml` from the merged PR's `major` / `minor` /
+`patch` label. `bash tests/next-version.sh minor` prints the tag that would produce.
 
 `render-docs.sh` is a step you have to remember, because CI checks the rendered README rather than
 pushing it for you. That is deliberate: the action that used to push it delegated to a mutable

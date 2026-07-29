@@ -59,6 +59,12 @@ jobs:
       - name: Third-party actions must be SHA-pinned
         run: bash tests/assert-actions-pinned.sh
 
+      # The release workflow only runs after merge, so its version arithmetic
+      # would otherwise first be exercised on master, where getting it wrong
+      # means a bad tag that consumers may already have pinned.
+      - name: Release version arithmetic
+        run: bash tests/next-version.sh --self-test
+
   # The behaviour this module documents is PROVIDER behaviour, so it has to be
   # exercised against the pinned provider on real CI rather than asserted in
   # prose. It runs no AWS API calls and needs no credentials.

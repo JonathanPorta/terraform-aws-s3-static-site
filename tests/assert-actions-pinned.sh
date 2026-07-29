@@ -23,6 +23,12 @@
 # looks like and still refuse to pass an unpinned ref.
 set -uo pipefail
 
+# Scan the repo, not the caller's cwd — otherwise running this from anywhere but
+# the root silently finds no .github/ and the "nothing to report" path reads as
+# a pass. (The empty-scan guard at the bottom catches that too; this stops it
+# happening in the first place.)
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 pass=0; fail=0
 ok() { echo "  ✓ $1"; pass=$((pass + 1)); }
 no() { echo "  ✗ $1"; fail=$((fail + 1)); }

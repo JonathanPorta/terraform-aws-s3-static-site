@@ -5,48 +5,97 @@ on:
   pull_request:
     types: [closed]
 
+# Only the tag push needs write, and only in the release job.
+permissions:
+  contents: read
+
 jobs:
+  # WHY THERE ARE NO THIRD-PARTY ACTIONS LEFT IN HERE
+  #
+  # This job used three: get-previous-tag, next-semvers, and action-create-tag.
+  # Review asked for them to be SHA-pinned, and pinning them turned out not to
+  # buy what a pin is supposed to buy:
+  #
+  #   WyriHaximus/github-action-next-semvers  — at the pinned commit, the entire
+  #   Dockerfile is `FROM wyrihaximusgithubactions/next-semvers:v1.2.1`. The pin
+  #   freezes a one-line file that then pulls a mutable Docker Hub tag, so none
+  #   of the code that actually runs is pinned. This is the same defect review
+  #   found in terraform-docs/gh-actions (a commit pin in front of
+  #   `docker://quay.io/…:1.0.0`), sitting in the job that computes a version
+  #   number and creates a release tag.
+  #
+  #   rickstaa/action-create-tag — weaker but not nothing: its own code is in the
+  #   pinned tree, but the image builds `FROM alpine:3.19`, also a mutable tag.
+  #
+  # Chasing that down to digests would mean pinning base images inside other
+  # people's repositories, which is not something this repo can hold. What it
+  # can do is not need them. The work was three lines of arithmetic and a
+  # `git tag`; it is now inline, with the arithmetic in tests/next-version.sh so
+  # it is testable rather than discovered to be wrong by a bad tag on master.
+  #
+  # `actions/checkout` stays: first-party, pinned, and a plain node action with
+  # no container delegation.
   release:
+    name: Cut the release tag
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # to push the tag
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      # fetch-depth: 0 so the full tag history is present to compute against.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
-      # These two were the last floating refs in the repo, and the worst place
-      # to leave one: this job computes the version number and then creates the
-      # release tag. A retagged upstream here does not just run unreviewed code
-      # in a credentialed job, it can steer the version handed to the tag steps
-      # below.
-      - name: 'Get Previous tag'
-        id: previoustag
-        uses: 'WyriHaximus/github-action-get-previous-tag@04e8485ecb6487243907e330d522ff60f02283ce' # v1.4.0
+      # The semver label is what authorises a release, so an ambiguous label set
+      # is an error rather than a guess: two of them and this fails instead of
+      # silently picking whichever the loop saw last.
+      - name: Read the semver label
+        id: bump
         env:
-          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+          bump=""
+          for want in major minor patch; do
+            if jq -e --arg w "$want" 'index($w) != null' <<< "$LABELS" > /dev/null; then
+              if [ -n "$bump" ]; then
+                echo "::error::PR carries both '$bump' and '$want' — exactly one semver label is required"
+                exit 1
+              fi
+              bump="$want"
+            fi
+          done
+          if [ -z "$bump" ]; then
+            echo "::notice::no major/minor/patch label on this PR — no release cut"
+          fi
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
 
-      # Pinned to the v1.2.1 release commit rather than to whatever `v1`
-      # resolves to. In this repo `v1` is not the head of the v1 line at all —
-      # it points at a commit 63 behind v1.2.1 — which is exactly the kind of
-      # thing a floating ref hides. v1.2.1 still declares the major/minor/patch
-      # outputs consumed below.
-      - name: 'Get next version'
-        id: semvers
-        uses: 'WyriHaximus/github-action-next-semvers@18aa9ed4152808ab99b88d71f5481e41f8d89930' # v1.2.1
-        with:
-          version: ${{ steps.previoustag.outputs.tag }}
+      - name: Verify the version arithmetic
+        if: steps.bump.outputs.bump != ''
+        run: bash tests/next-version.sh --self-test
 
-      - uses: rickstaa/action-create-tag@a1c7777fcb2fee4f19b0f283ba888afa11678b72  # v1
-        if: contains(github.event.pull_request.labels.*.name, 'minor')
-        with:
-          tag: '${{ steps.semvers.outputs.minor }}'
+      - name: Create and push the tag
+        if: steps.bump.outputs.bump != ''
+        env:
+          BUMP: ${{ steps.bump.outputs.bump }}
+        run: |
+          set -euo pipefail
+          prev="$(git tag --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
+          prev="${prev:-0.0.0}"
+          next="$(bash tests/next-version.sh "$BUMP" "$prev")"
+          echo "previous=$prev  bump=$BUMP  next=$next"
 
-      - uses: rickstaa/action-create-tag@a1c7777fcb2fee4f19b0f283ba888afa11678b72  # v1
-        if: contains(github.event.pull_request.labels.*.name, 'major')
-        with:
-          tag: '${{ steps.semvers.outputs.major }}'
+          # Never move an existing release tag. If it is already there, something
+          # is wrong with the assumption that this PR is the one cutting it, and
+          # overwriting would silently repoint a version consumers have pinned.
+          if git rev-parse -q --verify "refs/tags/$next" > /dev/null; then
+            echo "::error::tag $next already exists — refusing to move it"
+            exit 1
+          fi
 
-      - uses: rickstaa/action-create-tag@a1c7777fcb2fee4f19b0f283ba888afa11678b72  # v1
-        if: contains(github.event.pull_request.labels.*.name, 'patch')
-        with:
-          tag: '${{ steps.semvers.outputs.patch }}'
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$next" -m "Release $next"
+          git push origin "refs/tags/$next"
+          echo "::notice::released $next"

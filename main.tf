@@ -58,11 +58,16 @@ resource "aws_s3_bucket_acl" "app_bucket_acl" {
 # `terraform apply` would silently revert it, removing the control with no
 # signal. That failure mode is worst exactly where these statements matter most.
 #
-# So the policy is composed here instead, via `source_policy_documents`. The
-# module keeps sole ownership of the resource; consumers contribute statements
-# through `var.extra_policy_documents`. Statements are authored caller-side as
-# `aws_iam_policy_document` data sources, so the AWS provider type-checks every
-# action, principal, resource, and condition before a plan is even rendered.
+# So the policy is composed here instead. The module keeps sole ownership of the
+# resource; consumers contribute statements through `var.extra_policy_documents`.
+#
+# WHAT THE PROVIDER DOES AND DOES NOT CHECK
+#
+# `aws_iam_policy_document` gives callers structured HCL and deterministic JSON
+# composition. It does NOT validate IAM semantics: a nonexistent action, a
+# malformed resource, an invented principal type, or an unknown condition
+# operator all render successfully and fail later, at AWS, during the resource
+# operation. AWS remains the authority on whether a policy means anything.
 data "aws_iam_policy_document" "app_bucket_public_read" {
   statement {
     sid       = "PublicReadGetObject"
@@ -77,13 +82,23 @@ data "aws_iam_policy_document" "app_bucket_public_read" {
   }
 }
 
-# The public-read statement is FIRST, so a caller-supplied document with the same
-# Sid overrides it deliberately rather than by accident of ordering.
+# SOURCE vs OVERRIDE — this distinction is load-bearing, not stylistic.
+#
+# Documents merged through `source_policy_documents` must have mutually unique
+# Sids: the pinned provider (v4.8.0) hard-errors with
+# `duplicate Sid (PublicReadGetObject) in source_policy_documents`. So putting
+# caller documents there would make the documented "reuse the Sid to replace the
+# built-in statement" path fail at PLAN time — a public API promise the module
+# could not keep.
+#
+# `override_policy_documents` has the merge semantics actually wanted: a
+# statement with a unique Sid is appended, and one reusing an earlier Sid
+# REPLACES it. Hence built-in as the source, callers as overrides.
+#
+# Verified against provider 4.8.0 by tests/policy-composition.
 data "aws_iam_policy_document" "app_bucket" {
-  source_policy_documents = concat(
-    [data.aws_iam_policy_document.app_bucket_public_read.json],
-    var.extra_policy_documents,
-  )
+  source_policy_documents   = [data.aws_iam_policy_document.app_bucket_public_read.json]
+  override_policy_documents = var.extra_policy_documents
 }
 
 # NOTE: the resource address is unchanged (`app_bucket_public_read`) so existing

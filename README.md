@@ -68,9 +68,26 @@ module "static_website" {
 }
 ```
 
-The module still owns the single `aws_s3_bucket_policy` resource; your documents are merged into it via `source_policy_documents`, after the built-in `PublicReadGetObject` statement. Authoring them as `aws_iam_policy_document` data sources means the AWS provider validates actions, principals, resources, and conditions at plan time.
+The module still owns the single `aws_s3_bucket_policy` resource; your documents are merged into it through **`override_policy_documents`**, which gives the merge semantics you want:
+
+| your document's `Sid` | result |
+|---|---|
+| unique | appended to the policy |
+| `PublicReadGetObject` | **replaces** the module's built-in statement |
+
+Caller documents cannot go in `source_policy_documents`: duplicate Sids there are a hard provider error (`duplicate Sid (PublicReadGetObject) in source_policy_documents`), so the "reuse the Sid to replace it" path would fail at plan time.
+
+**What `aws_iam_policy_document` does and does not do for you.** It gives you structured HCL and deterministic JSON composition. It does **not** validate IAM semantics — a nonexistent action, a malformed resource ARN, an invented principal type, or an unknown condition operator all render successfully and are rejected later by **AWS**, when the policy is applied. Do not treat a clean plan as evidence that a policy is valid.
+
+Both merge behaviours are covered by `tests/assert-composition.sh`, which runs against the module's pinned provider on CI.
 
 Because the bucket ARN is an output of this module, referencing it inside a document you pass *in* would be circular. Construct the ARN from the hostname instead — `arn:aws:s3:::${var.hostname}` — since the bucket is named for its hostname.
+
+### Upgrading from 1.4.0
+
+With `extra_policy_documents` unset, the rendered policy is **semantically equivalent** to 1.4.0 and the `aws_s3_bucket_policy` resource address is unchanged, so no replacement or state-address churn is expected.
+
+It is *not* byte-for-byte identical: the data source's rendered JSON differs from the previous `jsonencode` output, so expect at most a one-time in-place policy update on first apply.
 
 ### Content-Type drift detection
 
@@ -143,7 +160,7 @@ No modules.
 |------|-------------|------|---------|:--------:|
 | <a name="input_environment"></a> [environment](#input\_environment) | The name of the environment that this static site belongs to. e.g. [staging, production] | `string` | n/a | yes |
 | <a name="input_error_document_key"></a> [error\_document\_key](#input\_error\_document\_key) | The optional name of the error document to use for the bucket. | `string` | `"index.html"` | no |
-| <a name="input_extra_policy_documents"></a> [extra\_policy\_documents](#input\_extra\_policy\_documents) | Additional IAM policy documents to compose into this bucket's single policy,<br>as rendered JSON — typically `data.aws_iam_policy_document.<name>.json`.<br><br>A bucket has exactly one policy and this module owns it, so a consumer cannot<br>declare a second `aws_s3_bucket_policy`, and must not apply one out of band<br>(the next apply would silently revert it). Contribute statements here instead.<br><br>Authoring them as `aws_iam_policy_document` data sources means the AWS<br>provider validates actions, principals, resources, and conditions at plan<br>time rather than at apply time.<br><br>Merged after the module's own PublicReadGetObject statement, so a document<br>reusing that Sid overrides it intentionally. Default `[]` keeps the rendered<br>policy identical to pre-1.5.0 behaviour. | `list(string)` | `[]` | no |
+| <a name="input_extra_policy_documents"></a> [extra\_policy\_documents](#input\_extra\_policy\_documents) | Additional IAM policy documents to compose into this bucket's single policy,<br>as rendered JSON — typically `data.aws_iam_policy_document.<name>.json`.<br><br>A bucket has exactly one policy and this module owns it, so a consumer cannot<br>declare a second `aws_s3_bucket_policy`, and must not apply one out of band<br>(the next apply would silently revert it). Contribute statements here instead.<br><br>Authoring them as `aws_iam_policy_document` data sources gives you structured<br>HCL and deterministic JSON composition. It does NOT validate IAM semantics:<br>unknown actions, malformed resources, invented principal types, and unknown<br>condition operators all render fine and are rejected later by AWS, when the<br>policy is applied.<br><br>Supplied to `override_policy_documents`, so a document with a unique Sid is<br>appended and one reusing `PublicReadGetObject` replaces the built-in<br>statement. (They cannot go in `source_policy_documents`: duplicate Sids there<br>are a hard provider error.)<br><br>Default `[]` yields a policy semantically equivalent to pre-1.5.0 and leaves<br>the `aws_s3_bucket_policy` resource address unchanged, so no replacement or<br>state-address churn is expected. The rendered JSON is not byte-for-byte<br>identical to the previous `jsonencode` output. | `list(string)` | `[]` | no |
 | <a name="input_hostname"></a> [hostname](#input\_hostname) | The FQDN where this static site will be accessible. | `string` | n/a | yes |
 | <a name="input_index_document_suffix"></a> [index\_document\_suffix](#input\_index\_document\_suffix) | The optional name of the index document to use for the bucket. | `string` | `"index.html"` | no |
 | <a name="input_monitoring"></a> [monitoring](#input\_monitoring) | Whether or not to enable monitoring. | `bool` | `false` | no |

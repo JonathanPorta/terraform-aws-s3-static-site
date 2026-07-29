@@ -46,13 +46,21 @@ variable "extra_policy_documents" {
     declare a second `aws_s3_bucket_policy`, and must not apply one out of band
     (the next apply would silently revert it). Contribute statements here instead.
 
-    Authoring them as `aws_iam_policy_document` data sources means the AWS
-    provider validates actions, principals, resources, and conditions at plan
-    time rather than at apply time.
+    Authoring them as `aws_iam_policy_document` data sources gives you structured
+    HCL and deterministic JSON composition. It does NOT validate IAM semantics:
+    unknown actions, malformed resources, invented principal types, and unknown
+    condition operators all render fine and are rejected later by AWS, when the
+    policy is applied.
 
-    Merged after the module's own PublicReadGetObject statement, so a document
-    reusing that Sid overrides it intentionally. Default `[]` keeps the rendered
-    policy identical to pre-1.5.0 behaviour.
+    Supplied to `override_policy_documents`, so a document with a unique Sid is
+    appended and one reusing `PublicReadGetObject` replaces the built-in
+    statement. (They cannot go in `source_policy_documents`: duplicate Sids there
+    are a hard provider error.)
+
+    Default `[]` yields a policy semantically equivalent to pre-1.5.0 and leaves
+    the `aws_s3_bucket_policy` resource address unchanged, so no replacement or
+    state-address churn is expected. The rendered JSON is not byte-for-byte
+    identical to the previous `jsonencode` output.
   EOT
   type        = list(string)
   default     = []

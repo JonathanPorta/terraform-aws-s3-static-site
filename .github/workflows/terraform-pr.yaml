@@ -8,21 +8,51 @@ on:
       - synchronize
       - reopened
 
+# The previous version of this job was named "Terraform Validate" but ran only
+# `terraform fmt`, and its "Terraform Validate Status" step was gated on
+# `steps.plan.outcome` when no step declared `id: plan` — so that step never ran
+# and could never fail the job. The result was a green check that asserted
+# formatting alone while reading as validation. This module ships security
+# controls into consumers' bucket policies; a check that only looks like a gate
+# is worse than no gate.
 jobs:
-  validate_formatting:
-    name: Validate Terraform formatting
+  validate:
+    name: Validate Terraform
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
 
-      - name: Terraform Validate
-        if: github.event_name == 'pull_request'
-        run: terraform fmt -check=true -diff=true
+      # -recursive so the test fixture is covered too, not just the root module.
+      - name: Terraform fmt
+        run: terraform fmt -check=true -diff=true -recursive
 
-      - name: Terraform Validate Status
-        if: steps.plan.outcome == 'failure'
-        run: exit 1
+      # -backend=false: this is a module, it has no backend to configure.
+      - name: Terraform init
+        run: terraform init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: No stray whitespace
+        run: git diff --check
+
+  # The behaviour this module documents is PROVIDER behaviour, so it has to be
+  # exercised against the pinned provider on real CI rather than asserted in
+  # prose. It runs no AWS API calls and needs no credentials.
+  policy_composition:
+    name: Policy composition regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
+
+      - name: Compose policies against the pinned AWS provider
+        run: bash tests/assert-composition.sh
 
   # Note: the `Check for semantic version label` and `Check for pull
   # request type label` jobs that used to live here have been removed.

@@ -133,9 +133,9 @@ No modules.
 | [aws_s3_bucket_versioning.app_bucket_versioning](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_versioning) | resource |
 | [aws_s3_bucket_website_configuration.app_bucket_website](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_website_configuration) | resource |
 | [aws_s3_object.app_bucket_source](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_object) | resource |
+| [betteruptime_monitor.this](https://registry.terraform.io/providers/BetterStackHQ/better-uptime/latest/docs/resources/monitor) | resource |
 | [aws_iam_policy_document.app_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.app_bucket_public_read](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
-| [betteruptime_monitor.this](https://registry.terraform.io/providers/BetterStackHQ/better-uptime/latest/docs/resources/monitor) | resource |
 
 ## Inputs
 
@@ -143,7 +143,7 @@ No modules.
 |------|-------------|------|---------|:--------:|
 | <a name="input_environment"></a> [environment](#input\_environment) | The name of the environment that this static site belongs to. e.g. [staging, production] | `string` | n/a | yes |
 | <a name="input_error_document_key"></a> [error\_document\_key](#input\_error\_document\_key) | The optional name of the error document to use for the bucket. | `string` | `"index.html"` | no |
-| <a name="input_extra_policy_documents"></a> [extra\_policy\_documents](#input\_extra\_policy\_documents) | Additional IAM policy documents to compose into this bucket's single policy, as rendered JSON — typically `data.aws_iam_policy_document.<name>.json`.<br><br>A bucket has exactly one policy and this module owns it, so a consumer cannot declare a second `aws_s3_bucket_policy`, and must not apply one out of band (the next apply would silently revert it). Contribute statements here instead.<br><br>Authoring them as `aws_iam_policy_document` data sources means the AWS provider validates actions, principals, resources, and conditions at plan time rather than at apply time.<br><br>Merged after the module's own PublicReadGetObject statement, so a document reusing that Sid overrides it intentionally. Default `[]` keeps the rendered policy identical to pre-1.5.0 behaviour. | `list(string)` | `[]` | no |
+| <a name="input_extra_policy_documents"></a> [extra\_policy\_documents](#input\_extra\_policy\_documents) | Additional IAM policy documents to compose into this bucket's single policy,<br>as rendered JSON — typically `data.aws_iam_policy_document.<name>.json`.<br><br>A bucket has exactly one policy and this module owns it, so a consumer cannot<br>declare a second `aws_s3_bucket_policy`, and must not apply one out of band<br>(the next apply would silently revert it). Contribute statements here instead.<br><br>Authoring them as `aws_iam_policy_document` data sources means the AWS<br>provider validates actions, principals, resources, and conditions at plan<br>time rather than at apply time.<br><br>Merged after the module's own PublicReadGetObject statement, so a document<br>reusing that Sid overrides it intentionally. Default `[]` keeps the rendered<br>policy identical to pre-1.5.0 behaviour. | `list(string)` | `[]` | no |
 | <a name="input_hostname"></a> [hostname](#input\_hostname) | The FQDN where this static site will be accessible. | `string` | n/a | yes |
 | <a name="input_index_document_suffix"></a> [index\_document\_suffix](#input\_index\_document\_suffix) | The optional name of the index document to use for the bucket. | `string` | `"index.html"` | no |
 | <a name="input_monitoring"></a> [monitoring](#input\_monitoring) | Whether or not to enable monitoring. | `bool` | `false` | no |

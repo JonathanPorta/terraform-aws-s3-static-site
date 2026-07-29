@@ -20,8 +20,8 @@ jobs:
     name: Validate Terraform
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: hashicorp/setup-terraform@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - uses: hashicorp/setup-terraform@633666f66e0061ca3b725c73b2ec20cd13a8fdd1  # v2
         with:
           terraform_wrapper: false
 
@@ -39,6 +39,20 @@ jobs:
       - name: No stray whitespace
         run: git diff --check
 
+      # A tag is mutable, so a floating ref does not guarantee the workflow runs
+      # the action code that was reviewed. That matters most in the `docs` job,
+      # which grants its third-party action push access to the PR branch. The
+      # grep is the portfolio-standard audit from blessed-cicd docs/sha-pinning.md;
+      # first-party ./.github/actions/* refs start with "." and are excluded.
+      - name: Third-party actions must be SHA-pinned
+        run: |
+          set -uo pipefail
+          if grep -RnE 'uses:[[:space:]]+[^./].*@(v[0-9]|main|master|latest)([[:space:]]|$)' .github/; then
+            echo "::error::floating action ref(s) above — pin to a full 40-char commit SHA with a trailing # vN comment"
+            exit 1
+          fi
+          echo "all third-party actions are SHA-pinned"
+
   # The behaviour this module documents is PROVIDER behaviour, so it has to be
   # exercised against the pinned provider on real CI rather than asserted in
   # prose. It runs no AWS API calls and needs no credentials.
@@ -46,8 +60,8 @@ jobs:
     name: Policy composition regression
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: hashicorp/setup-terraform@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - uses: hashicorp/setup-terraform@633666f66e0061ca3b725c73b2ec20cd13a8fdd1  # v2
         with:
           terraform_wrapper: false
 
@@ -72,12 +86,12 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           ref: ${{ github.event.pull_request.head.ref }}
 
       - name: Render terraform docs inside the README.md and push changes back to PR branch
-        uses: terraform-docs/gh-actions@v1.0.0
+        uses: terraform-docs/gh-actions@f6d59f89a280fa0a3febf55ef68f146784b20ba0  # v1.0.0
         with:
           working-dir: .
           output-file: README.md

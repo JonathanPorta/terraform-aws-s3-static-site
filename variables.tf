@@ -36,3 +36,24 @@ variable "monitoring" {
   default     = false
 
 }
+
+variable "extra_policy_documents" {
+  description = <<-EOT
+    Additional IAM policy documents to compose into this bucket's single policy,
+    as rendered JSON — typically `data.aws_iam_policy_document.<name>.json`.
+
+    A bucket has exactly one policy and this module owns it, so a consumer cannot
+    declare a second `aws_s3_bucket_policy`, and must not apply one out of band
+    (the next apply would silently revert it). Contribute statements here instead.
+
+    Authoring them as `aws_iam_policy_document` data sources means the AWS
+    provider validates actions, principals, resources, and conditions at plan
+    time rather than at apply time.
+
+    Merged after the module's own PublicReadGetObject statement, so a document
+    reusing that Sid overrides it intentionally. Default `[]` keeps the rendered
+    policy identical to pre-1.5.0 behaviour.
+  EOT
+  type        = list(string)
+  default     = []
+}

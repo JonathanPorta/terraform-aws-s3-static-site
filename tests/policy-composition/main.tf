@@ -1,10 +1,26 @@
-# Regression fixture for the module's bucket-policy composition.
+# Static half of the bucket-policy regression fixture.
 #
-# It pins the SAME AWS provider constraint as the module, because the behaviour
-# under test is provider behaviour: v4.8.0 hard-errors on duplicate Sids in
-# `source_policy_documents`, which is precisely why caller documents must go to
-# `override_policy_documents`. A fixture on a newer provider could pass while the
-# module's pinned provider fails.
+# The half that matters — the built-in statement, the composing document, and
+# the `extra_policy_documents` variable — is NOT here. It is extracted verbatim
+# from the module by tests/assert-composition.sh into `generated-module.tf` on
+# every run.
+#
+# That is deliberate. This file used to hand-copy the module's policy documents,
+# and the drift guard was three greps for individual lines. A copy that agrees
+# with `main.tf` on those three lines and disagrees everywhere else still passed,
+# and — the concrete hole — the fixture never touched
+# `aws_s3_bucket_policy.app_bucket_public_read` at all, so reverting that
+# resource to consume the *uncomposed* document would have dropped every caller
+# statement while all checks stayed green. Deriving the fixture removes the
+# copy, and so removes the possibility of it drifting.
+#
+# What remains here is only what has no counterpart in the module: a credential-
+# free provider, the caller-supplied documents that stand in for a consumer, and
+# the outputs. The provider constraint is pinned to the SAME range as the module
+# because the behaviour under test is provider behaviour — v4.8.0 hard-errors on
+# duplicate Sids in `source_policy_documents`, which is the whole reason caller
+# documents go to `override_policy_documents`. A fixture on a newer provider
+# could pass while the module's pinned provider fails.
 #
 # No AWS resources, no credentials, no network: `aws_iam_policy_document` is
 # rendered locally by the provider.
@@ -27,26 +43,16 @@ provider "aws" {
   skip_requesting_account_id  = true
 }
 
+# Stands in for `aws_s3_bucket.app_bucket.arn`, which cannot be evaluated
+# without creating a bucket. assert-composition.sh rewrites that one reference
+# to this variable when it extracts the module's document, and fails if the
+# reference it expected to rewrite was not there.
 variable "bucket_arn" {
   type    = string
   default = "arn:aws:s3:::example.test"
 }
 
-# Mirrors the module's built-in statement. tests/assert-composition.sh checks
-# that this mirror has not drifted from main.tf.
-data "aws_iam_policy_document" "built_in" {
-  statement {
-    sid       = "PublicReadGetObject"
-    effect    = "Allow"
-    actions   = ["s3:GetObject"]
-    resources = ["${var.bucket_arn}/*"]
-
-    principals {
-      type        = "*"
-      identifiers = ["*"]
-    }
-  }
-}
+# ── what a consumer passes in ────────────────────────────────────────────────
 
 # A caller document with a UNIQUE Sid — must be APPENDED.
 data "aws_iam_policy_document" "unique_sid" {
@@ -84,23 +90,24 @@ data "aws_iam_policy_document" "duplicate_sid" {
   }
 }
 
-# ── the exact wiring main.tf uses ────────────────────────────────────────────
+# ── outputs ──────────────────────────────────────────────────────────────────
 
-data "aws_iam_policy_document" "composed_default" {
-  source_policy_documents   = [data.aws_iam_policy_document.built_in.json]
-  override_policy_documents = []
+# `composed` is the module's own composing document, extracted from main.tf.
+# The three cases are driven by re-applying with different values of
+# `var.extra_policy_documents` — the module's actual public API — rather than by
+# three separately-wired copies of the composition.
+output "composed" {
+  value = data.aws_iam_policy_document.app_bucket.json
 }
 
-data "aws_iam_policy_document" "composed_unique" {
-  source_policy_documents   = [data.aws_iam_policy_document.built_in.json]
-  override_policy_documents = [data.aws_iam_policy_document.unique_sid.json]
+output "builtin" {
+  value = data.aws_iam_policy_document.app_bucket_public_read.json
 }
 
-data "aws_iam_policy_document" "composed_override" {
-  source_policy_documents   = [data.aws_iam_policy_document.built_in.json]
-  override_policy_documents = [data.aws_iam_policy_document.duplicate_sid.json]
+output "unique_sid_json" {
+  value = data.aws_iam_policy_document.unique_sid.json
 }
 
-output "composed_default" { value = data.aws_iam_policy_document.composed_default.json }
-output "composed_unique" { value = data.aws_iam_policy_document.composed_unique.json }
-output "composed_override" { value = data.aws_iam_policy_document.composed_override.json }
+output "duplicate_sid_json" {
+  value = data.aws_iam_policy_document.duplicate_sid.json
+}

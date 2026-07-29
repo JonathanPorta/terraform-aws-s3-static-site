@@ -8,6 +8,13 @@ on:
       - synchronize
       - reopened
 
+# No job in this workflow writes to the repo any more — the docs job checks for
+# drift instead of pushing it. Stating that here means the token handed to every
+# third-party action in the file cannot commit, whatever the repository-wide
+# default happens to be set to.
+permissions:
+  contents: read
+
 # The previous version of this job was named "Terraform Validate" but ran only
 # `terraform fmt`, and its "Terraform Validate Status" step was gated on
 # `steps.plan.outcome` when no step declared `id: plan` — so that step never ran
@@ -40,18 +47,17 @@ jobs:
         run: git diff --check
 
       # A tag is mutable, so a floating ref does not guarantee the workflow runs
-      # the action code that was reviewed. That matters most in the `docs` job,
-      # which grants its third-party action push access to the PR branch. The
-      # grep is the portfolio-standard audit from blessed-cicd docs/sha-pinning.md;
-      # first-party ./.github/actions/* refs start with "." and are excluded.
+      # the action code that was reviewed.
+      #
+      # This used to be the denylist grep from blessed-cicd docs/sha-pinning.md,
+      # inline. It passed while two floating refs sat in terraform-publish.yaml,
+      # because it only matched float spellings someone had enumerated and the
+      # quoting defeated its anchor. The audit is now an allowlist with its own
+      # self-test — see tests/assert-actions-pinned.sh for the specific blind
+      # spots it is built to keep out. The blessed-cicd example needs the same
+      # correction; that is a separate change to that repo.
       - name: Third-party actions must be SHA-pinned
-        run: |
-          set -uo pipefail
-          if grep -RnE 'uses:[[:space:]]+[^./].*@(v[0-9]|main|master|latest)([[:space:]]|$)' .github/; then
-            echo "::error::floating action ref(s) above — pin to a full 40-char commit SHA with a trailing # vN comment"
-            exit 1
-          fi
-          echo "all third-party actions are SHA-pinned"
+        run: bash tests/assert-actions-pinned.sh
 
   # The behaviour this module documents is PROVIDER behaviour, so it has to be
   # exercised against the pinned provider on real CI rather than asserted in
@@ -83,17 +89,32 @@ jobs:
   # by a single caller too. Tracked in the blessed-cicd vendoring
   # tracker issue.
 
+  # This job used to run terraform-docs/gh-actions with `git-push: 'true'`.
+  # Pinning that action to a commit did not pin what executed: its action.yml
+  # delegates to `docker://quay.io/terraform-docs/gh-actions:1.0.0`, and a
+  # registry tag is mutable, so the reviewed commit froze the wrapper and not
+  # the code. Combined with push access to the PR branch, repointing one Quay
+  # tag would have bought both arbitrary execution and a commit on the branch
+  # under review.
+  #
+  # It now verifies instead of writing: same renderer, fetched by checksum, and
+  # the job is read-only. See tests/render-docs.sh.
   docs:
+    name: README is in sync with terraform-docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
 
-      - name: Render terraform docs inside the README.md and push changes back to PR branch
-        uses: terraform-docs/gh-actions@f6d59f89a280fa0a3febf55ef68f146784b20ba0  # v1.0.0
-        with:
-          working-dir: .
-          output-file: README.md
-          output-method: inject
-          git-push: 'true'
+      - name: Render docs
+        run: bash tests/render-docs.sh
+
+      # Reporting the drift beats silently committing it: a README that changed
+      # because a variable's contract changed is something a reviewer should see
+      # in the diff, not something CI quietly appends after approval.
+      - name: README is up to date
+        run: |
+          if ! git diff --exit-code -- README.md; then
+            echo "::error::README.md is stale — run 'bash tests/render-docs.sh' and commit the result"
+            exit 1
+          fi
+          echo "README.md matches terraform-docs output"

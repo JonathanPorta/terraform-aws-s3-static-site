@@ -28,6 +28,12 @@ override.tf.json
 # Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
 # example: *tfplan*
 
+# Extracted from main.tf/variables.tf by tests/assert-composition.sh on every
+# run. Committing it would recreate exactly the hand-copied fixture it exists to
+# replace — a checked-in copy that can disagree with the module.
+tests/policy-composition/generated-module.tf
+tests/policy-composition/*.tfvars.json
+
 # Dependency lock file. This repo is a SHARED MODULE, not a root configuration:
 # consumers resolve providers with their own lock. Committing one here would also
 # pin whichever CLI generated it (a `tofu init` writes registry.opentofu.org

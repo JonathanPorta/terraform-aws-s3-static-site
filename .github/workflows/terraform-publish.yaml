@@ -14,15 +14,25 @@ jobs:
         with:
           fetch-depth: 0
 
+      # These two were the last floating refs in the repo, and the worst place
+      # to leave one: this job computes the version number and then creates the
+      # release tag. A retagged upstream here does not just run unreviewed code
+      # in a credentialed job, it can steer the version handed to the tag steps
+      # below.
       - name: 'Get Previous tag'
         id: previoustag
-        uses: 'WyriHaximus/github-action-get-previous-tag@v1'
+        uses: 'WyriHaximus/github-action-get-previous-tag@04e8485ecb6487243907e330d522ff60f02283ce' # v1.4.0
         env:
           GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
 
+      # Pinned to the v1.2.1 release commit rather than to whatever `v1`
+      # resolves to. In this repo `v1` is not the head of the v1 line at all —
+      # it points at a commit 63 behind v1.2.1 — which is exactly the kind of
+      # thing a floating ref hides. v1.2.1 still declares the major/minor/patch
+      # outputs consumed below.
       - name: 'Get next version'
         id: semvers
-        uses: 'WyriHaximus/github-action-next-semvers@v1'
+        uses: 'WyriHaximus/github-action-next-semvers@18aa9ed4152808ab99b88d71f5481e41f8d89930' # v1.2.1
         with:
           version: ${{ steps.previoustag.outputs.tag }}
 

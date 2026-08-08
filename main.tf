@@ -7,23 +7,40 @@ resource "aws_s3_bucket" "app_bucket" {
   }
 }
 
+# ObjectWriter keeps ACLs usable, which the public mode depends on.
+# BucketOwnerEnforced disables ACLs entirely — the modern guidance this
+# module's README lists as its v2 roadmap item — and private mode adopts it
+# now, because an origin that still honours object ACLs is not private.
 resource "aws_s3_bucket_ownership_controls" "app_bucket_acl_ownership" {
   bucket = aws_s3_bucket.app_bucket.id
   rule {
-    object_ownership = "ObjectWriter"
+    object_ownership = var.private_origin ? "BucketOwnerEnforced" : "ObjectWriter"
   }
 }
 
 resource "aws_s3_bucket_public_access_block" "app_bucket_public_access" {
   bucket = aws_s3_bucket.app_bucket.id
 
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
+  # All four are the inverse of the mode. Public mode must leave them off or
+  # its public-read ACL and unconditional policy are rejected; private mode
+  # turns all four on, which is only possible because the private policy
+  # qualifies as non-public (see the aws:SourceIp note on the policy document).
+  block_public_acls       = var.private_origin
+  block_public_policy     = var.private_origin
+  ignore_public_acls      = var.private_origin
+  restrict_public_buckets = var.private_origin
 }
 
+# Absent entirely in private mode: with BucketOwnerEnforced, applying any
+# bucket ACL is an error, and a "private" bucket carrying a public-read ACL
+# would be a contradiction rather than a hardening.
+#
+# The `moved` block below keeps this from churning existing consumers' state
+# when they upgrade: the address gains an index, and Terraform is told that is
+# a refactor rather than a replace.
 resource "aws_s3_bucket_acl" "app_bucket_acl" {
+  count = var.private_origin ? 0 : 1
+
   depends_on = [
     aws_s3_bucket_ownership_controls.app_bucket_acl_ownership,
     aws_s3_bucket_public_access_block.app_bucket_public_access,
@@ -31,6 +48,11 @@ resource "aws_s3_bucket_acl" "app_bucket_acl" {
 
   bucket = aws_s3_bucket.app_bucket.id
   acl    = "public-read"
+}
+
+moved {
+  from = aws_s3_bucket_acl.app_bucket_acl
+  to   = aws_s3_bucket_acl.app_bucket_acl[0]
 }
 
 # ── Bucket policy ────────────────────────────────────────────────────────────
@@ -79,6 +101,41 @@ data "aws_iam_policy_document" "app_bucket_public_read" {
       type        = "*"
       identifiers = ["*"]
     }
+
+    # PRIVATE MODE — why both conditions, and why these two specifically.
+    #
+    # aws:SourceIp is what makes this policy legal at all. AWS evaluates a
+    # bucket policy as public unless it grants access only to fixed values of an
+    # enumerated set of condition keys; aws:SourceIp with fixed CIDRs is on that
+    # list, so a Principal "*" statement conditioned on it is treated as
+    # NON-public and survives block_public_policy = true. aws:Referer is NOT on
+    # that list — a Referer-only policy would still be evaluated as public and
+    # rejected, so private mode would fail to apply.
+    #
+    # aws:Referer is what makes the IP allowlist mean anything. Cloudflare's
+    # egress ranges are shared by every Cloudflare customer, so SourceIp alone
+    # authenticates "some Cloudflare account", not this one; anyone could point
+    # their own zone at the origin and be inside the range. The shared secret is
+    # what binds the origin to the caller's zone.
+    #
+    # Neither is sufficient alone, so both are emitted together or not at all.
+    dynamic "condition" {
+      for_each = var.private_origin ? [1] : []
+      content {
+        test     = "IpAddress"
+        variable = "aws:SourceIp"
+        values   = var.private_origin_allowed_cidrs
+      }
+    }
+
+    dynamic "condition" {
+      for_each = var.private_origin ? [1] : []
+      content {
+        test     = "StringEquals"
+        variable = "aws:Referer"
+        values   = [var.private_origin_referer_secret]
+      }
+    }
   }
 }
 
@@ -111,6 +168,24 @@ resource "aws_s3_bucket_policy" "app_bucket_public_read" {
 
   bucket = aws_s3_bucket.app_bucket.id
   policy = data.aws_iam_policy_document.app_bucket.json
+
+  # Contradictory inputs fail at PLAN time rather than producing a bucket that
+  # is neither properly public nor properly private. Terraform cannot express
+  # cross-variable checks in a `validation` block, so they live here.
+  lifecycle {
+    precondition {
+      condition     = var.private_origin || (length(var.private_origin_allowed_cidrs) == 0 && var.private_origin_referer_secret == null)
+      error_message = "private_origin_allowed_cidrs and private_origin_referer_secret are only meaningful when private_origin = true. Set private_origin = true or remove them."
+    }
+    precondition {
+      condition     = !var.private_origin || length(var.private_origin_allowed_cidrs) > 0
+      error_message = "private_origin = true requires a non-empty private_origin_allowed_cidrs. An empty allowlist would leave the origin reachable from nowhere, or — if the condition were dropped — from everywhere."
+    }
+    precondition {
+      condition     = !var.private_origin || (var.private_origin_referer_secret != null && length(var.private_origin_referer_secret) >= 32)
+      error_message = "private_origin = true requires private_origin_referer_secret of at least 32 characters. Without it the allowlist authenticates any Cloudflare customer, not this zone."
+    }
+  }
 }
 
 resource "aws_s3_bucket_versioning" "app_bucket_versioning" {
@@ -177,7 +252,9 @@ resource "aws_s3_object" "app_bucket_source" {
     filemd5("${var.source_files}/${each.value}"),
     local.source_content_types[each.value]
   ]))
-  acl          = "public-read"
+  # null omits the ACL entirely. Required in private mode: under
+  # BucketOwnerEnforced, sending any object ACL is a hard error.
+  acl          = var.private_origin ? null : "public-read"
   content_type = local.source_content_types[each.value]
 
   # Order uploads AFTER the ownership control (re-enables ACLs) and the public-

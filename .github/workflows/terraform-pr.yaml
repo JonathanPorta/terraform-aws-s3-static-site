@@ -80,6 +80,9 @@ jobs:
       - name: Compose policies against the pinned AWS provider
         run: bash tests/assert-composition.sh
 
+      - name: Private-origin mode closes the origin, and the default does not change
+        run: bash tests/assert-private-origin.sh
+
   # Note: the `Check for semantic version label` and `Check for pull
   # request type label` jobs that used to live here have been removed.
   # They duplicated what .github/workflows/pr-labels.yml and

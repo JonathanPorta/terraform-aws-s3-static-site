@@ -64,6 +64,19 @@ builtin_block="$(extract_block "$ROOT/main.tf" '^data "aws_iam_policy_document" 
 compose_block="$(extract_block "$ROOT/main.tf" '^data "aws_iam_policy_document" "app_bucket"[[:space:]]*\{')"
 var_block="$(extract_block "$ROOT/variables.tf" '^variable "extra_policy_documents"')"
 
+# The built-in document also references the private-origin variables now, so the
+# fixture has to declare them or the extracted block will not evaluate. They are
+# lifted rather than restated for the same reason everything else here is: a
+# restatement can drift. This fixture exercises the DEFAULT (public) mode, so
+# they simply take their defaults — private mode has its own suite in
+# tests/assert-private-origin.sh.
+private_var_blocks=""
+for pv in private_origin private_origin_allowed_cidrs private_origin_referer_secret; do
+  blk="$(extract_block "$ROOT/variables.tf" "^variable \"$pv\"")"
+  [ -n "$blk" ] || die "could not find variable $pv in variables.tf"
+  private_var_blocks="$private_var_blocks$blk"$'\n\n'
+done
+
 [ -n "$builtin_block" ] || die "could not find data.aws_iam_policy_document.app_bucket_public_read in main.tf"
 [ -n "$compose_block" ] || die "could not find data.aws_iam_policy_document.app_bucket in main.tf"
 [ -n "$var_block" ] || die "could not find variable extra_policy_documents in variables.tf"
@@ -86,6 +99,7 @@ ok "rewrote the bucket ARN reference to the fixture's stand-in"
   echo
   echo "$var_block"
   echo
+  echo "$private_var_blocks"
   echo "$builtin_block"
   echo
   echo "$compose_block"

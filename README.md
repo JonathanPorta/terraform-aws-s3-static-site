@@ -106,23 +106,50 @@ That way, if the mime mapping changes (e.g. the module ships a new entry in `mim
 
 The first `terraform apply` after upgrading to a module version that includes this fix will re-upload **every** existing object once, even if its content type is already correct. Subsequent applies are no-ops.
 
+### Private origin (opt-in)
+
+Set `private_origin = true` to serve the bucket to a fronting CDN only, instead of to the public internet. It is off by default and changes nothing for existing consumers.
+
+```hcl
+module "site" {
+  # ...
+  private_origin                = true
+  private_origin_allowed_cidrs  = ["173.245.48.0/20", "103.21.244.0/22", "2400:cb00::/32"]
+  private_origin_referer_secret = var.origin_secret  # >= 32 chars, keep it out of VCS
+}
+```
+
+In this mode the module sets `object_ownership = "BucketOwnerEnforced"`, enables **all four** public-access-block settings, creates no `aws_s3_bucket_acl`, sets no object ACLs, and conditions the read policy on **both** `aws:SourceIp` and `aws:Referer`.
+
+**Both conditions are load-bearing.** AWS evaluates a bucket policy as public unless it grants access only to fixed values of an enumerated set of condition keys. `aws:SourceIp` with fixed CIDRs is on that list, which is what lets a `Principal: "*"` statement survive `block_public_policy = true`. `aws:Referer` is *not* on that list, so a Referer-only policy would still be evaluated as public and rejected. Conversely, a CDN's egress ranges are shared by all of its tenants, so `aws:SourceIp` alone authenticates "some tenant", not yours — anyone could point their own zone at your origin. The shared secret is what binds the origin to your zone.
+
+AWS also treats `aws:SourceIp` ranges broader than `/8` (IPv4) or `/32` (IPv6) as public. The module rejects those at plan time rather than letting the apply fail with a distant error.
+
+Two caveats worth knowing before you adopt it:
+
+- **The origin hop is HTTP.** S3 website endpoints do not serve HTTPS. Your CDN terminates TLS for the user; CDN-to-origin is plaintext.
+- **The secret is in Terraform state.** A policy condition value is part of the resource, so it cannot be kept out of state. The variable is marked `sensitive` (so it stays out of CLI output), but your state backend is the real boundary. Rotate by changing the value and re-applying — no data migration.
+
+Upgrading is a no-op for public consumers: the bucket ACL gains a `count` index, and a `moved` block tells Terraform that is a refactor rather than a replace, so no state migration is required.
+
 ### v2 roadmap (planned)
 
-Modern AWS guidance is to disable ACLs entirely (`object_ownership = "BucketOwnerEnforced"`) and rely on bucket policies as the sole access-control mechanism. A future v2 of this module will:
+Private mode already adopts the modern posture — `BucketOwnerEnforced`, no ACLs, policy as the sole access-control mechanism — but only when opted into. A future v2 will make it the default for *public* sites too:
 
-- Switch ownership to `BucketOwnerEnforced`
+- Switch ownership to `BucketOwnerEnforced` unconditionally
 - Remove the `aws_s3_bucket_acl` resource
 - Remove `acl = "public-read"` from `aws_s3_object` resources
 - Rely entirely on `aws_s3_bucket_policy` for public access
 
-This is a breaking change requiring a Terraform state migration, which is why it's deferred to a major version bump.
+That remains a breaking change for public consumers, which is why it stays deferred to a major version bump.
 
 ## Development
 
-Three checks run on every PR, and all three are runnable locally:
+Four checks run on every PR, and all four are runnable locally:
 
 ```sh
 bash tests/assert-composition.sh        # bucket-policy merge semantics, against the pinned provider
+bash tests/assert-private-origin.sh     # private mode closes the origin; the public default is unchanged
 bash tests/assert-actions-pinned.sh     # every third-party GitHub Action is pinned to a commit SHA
 bash tests/next-version.sh --self-test  # the arithmetic that names a release
 bash tests/render-docs.sh               # regenerate the block below, then commit the result
@@ -143,6 +170,7 @@ input's contract changed belongs in the diff a reviewer reads, not in a commit C
 
 | Name | Version |
 | ---- | ------- |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.2 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 4.8.0 |
 | <a name="requirement_betteruptime"></a> [betteruptime](#requirement\_betteruptime) | ~> 0.3.15 |
 
@@ -183,6 +211,9 @@ No modules.
 | <a name="input_hostname"></a> [hostname](#input\_hostname) | The FQDN where this static site will be accessible. | `string` | n/a | yes |
 | <a name="input_index_document_suffix"></a> [index\_document\_suffix](#input\_index\_document\_suffix) | The optional name of the index document to use for the bucket. | `string` | `"index.html"` | no |
 | <a name="input_monitoring"></a> [monitoring](#input\_monitoring) | Whether or not to enable monitoring. | `bool` | `false` | no |
+| <a name="input_private_origin"></a> [private\_origin](#input\_private\_origin) | Serve the site to a fronting CDN only, instead of to the public internet.<br/><br/>When true the module sets object\_ownership = "BucketOwnerEnforced", enables<br/>ALL FOUR public-access-block settings, creates no bucket ACL, sets no object<br/>ACLs, and conditions the read policy on BOTH the caller's egress CIDRs<br/>(aws:SourceIp) AND a shared origin secret (aws:Referer).<br/><br/>Requires private\_origin\_allowed\_cidrs and private\_origin\_referer\_secret.<br/>Leaving it false changes nothing about this module's behaviour. | `bool` | `false` | no |
+| <a name="input_private_origin_allowed_cidrs"></a> [private\_origin\_allowed\_cidrs](#input\_private\_origin\_allowed\_cidrs) | Egress CIDR blocks permitted to read the bucket in private mode, normally<br/>the fronting CDN's published ranges.<br/><br/>Pinned in source rather than fetched at apply time, so a change to the<br/>security boundary is a reviewable diff instead of a silent drift. A stale<br/>list fails closed. | `list(string)` | `[]` | no |
+| <a name="input_private_origin_referer_secret"></a> [private\_origin\_referer\_secret](#input\_private\_origin\_referer\_secret) | Shared secret the fronting CDN must send as the Referer header on every<br/>origin request in private mode. At least 32 characters.<br/><br/>This is what distinguishes THIS CDN zone from every other tenant of the same<br/>egress ranges; the CIDR allowlist alone authenticates the CDN, not the<br/>account. Rotate by changing this value and re-applying — no data migration.<br/><br/>Note: a bucket policy condition value is necessarily part of the resource,<br/>so this appears in Terraform state and in plan output. Mark your state<br/>backend accordingly. `sensitive` keeps it out of CLI output and logs. | `string` | `null` | no |
 | <a name="input_routing_rule_key_prefix_equals"></a> [routing\_rule\_key\_prefix\_equals](#input\_routing\_rule\_key\_prefix\_equals) | The optional key prefix to match. | `string` | `null` | no |
 | <a name="input_routing_rule_replace_key_with"></a> [routing\_rule\_replace\_key\_with](#input\_routing\_rule\_replace\_key\_with) | The optional name key to replace with. | `string` | `null` | no |
 | <a name="input_source_files"></a> [source\_files](#input\_source\_files) | A path to the website's source files. These will be uploaded to the bucket. | `string` | n/a | yes |

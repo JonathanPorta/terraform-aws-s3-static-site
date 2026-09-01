@@ -241,17 +241,16 @@ resource "aws_s3_object" "app_bucket_source" {
   bucket   = aws_s3_bucket.app_bucket.id
   key      = each.value
   source   = "${var.source_files}/${each.value}"
-  # Compose the file md5 with the derived content_type so a change to the
-  # mime mapping (e.g. this module ships a new mime.json entry) forces a
-  # re-upload, even when the underlying bytes are unchanged. Without this,
-  # objects originally uploaded under an older module version stay stuck
-  # with their original content_type (often application/octet-stream),
-  # which breaks downstream features that depend on a correct MIME type
-  # (e.g. social-card image previews on iMessage / Facebook / Slack).
-  etag = md5(join("|", [
-    filemd5("${var.source_files}/${each.value}"),
-    local.source_content_types[each.value]
-  ]))
+  # The raw file md5, which is what S3 itself reports as the ETag for a
+  # single-part upload. Anything else can never converge: S3 returns its own
+  # ETag, refresh writes that into state, and the next plan wants the computed
+  # value again — a permanent diff that re-uploads every object on every apply.
+  #
+  # A changed MIME mapping still forces an upload. `content_type` is a managed
+  # argument, and provider 4.8.0 counts it as an object-content change in
+  # hasS3ObjectContentChanges(), so the re-upload happens through that argument
+  # rather than by folding metadata into the remote ETag.
+  etag = filemd5("${var.source_files}/${each.value}")
   # null omits the ACL entirely. Required in private mode: under
   # BucketOwnerEnforced, sending any object ACL is a hard error.
   acl          = var.private_origin ? null : "public-read"

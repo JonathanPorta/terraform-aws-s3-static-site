@@ -89,22 +89,21 @@ With `extra_policy_documents` unset, the rendered policy is **semantically equiv
 
 It is *not* byte-for-byte identical: the data source's rendered JSON differs from the previous `jsonencode` output, so expect at most a one-time in-place policy update on first apply.
 
-### Content-Type drift detection
+### ETag and Content-Type drift detection
 
-The `aws_s3_object` resource's `etag` attribute is what Terraform uses to decide whether a file needs to be re-uploaded. By default Terraform sets it to `filemd5(...)`, which means changes to the file *contents* trigger a re-upload but changes to derived metadata (like `content_type`) do not.
-
-This module composes the etag from **both** the file md5 and the derived content type:
+The `aws_s3_object` resource's `etag` is what Terraform compares to decide whether a file needs re-uploading. This module sets it to the raw file md5:
 
 ```hcl
-etag = md5(join("|", [
-  filemd5(...),
-  local.source_content_types[each.value]
-]))
+etag = filemd5("${var.source_files}/${each.value}")
 ```
 
-That way, if the mime mapping changes (e.g. the module ships a new entry in `mime.json`, or you upgrade from an older module version that defaulted JPGs to `application/octet-stream`), the next `terraform apply` re-uploads the affected objects with the correct `Content-Type` header.
+That is the value S3 itself reports as the ETag of a single-part upload, so state and remote agree and an unchanged object converges to an empty plan.
 
-The first `terraform apply` after upgrading to a module version that includes this fix will re-upload **every** existing object once, even if its content type is already correct. Subsequent applies are no-ops.
+A changed MIME mapping still forces a re-upload. `content_type` is a managed argument, and AWS provider `4.8.0` treats it as an object-content change in `hasS3ObjectContentChanges()` — so the upload happens through that argument, not by folding metadata into the remote ETag.
+
+> **Fixed in 1.6.1.** Versions 1.3.0–1.6.0 composed the ETag from the file md5 *and* the derived content type:
+> `etag = md5(join("|", [filemd5(...), content_type]))`.
+> That value never matches what S3 returns. Refresh wrote S3's real ETag into state, the next plan wanted the composed value again, and the result was a **permanent diff that re-uploaded every object on every apply**. The claim in earlier READMEs that "subsequent applies are no-ops" was wrong — they never were. Upgrading to 1.6.1 makes the diff disappear without any object upload, because the raw md5 already matches what is stored in state.
 
 ### Private origin (opt-in)
 

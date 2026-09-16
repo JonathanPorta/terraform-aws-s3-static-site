@@ -89,13 +89,13 @@ database-migration         → 🗄️ database
 The labeling system integrates with our release workflow:
 
 1. **Auto-labeling** applies type labels based on branch names
-2. **Version validation** ensures every PR has a version label (major/minor/patch)
+2. **Version validation** ensures every PR has exactly one version label (major/minor/patch)
 3. **Smart suggestions** recommend version labels based on detected change types
 4. **Automated releases** use labels to determine version bumps
 
 ## 🔧 Manual Override
 
-You can always manually add, remove, or change labels on any PR. The automation is designed to be helpful, not restrictive.
+Choose version labels manually. Opening, updating, reopening, labeling, or unlabeling a PR reruns the workflow, so removing a branch-derived type/domain label causes it to be reapplied. Change the branch name or mapping when the automatic classification is wrong.
 
 ## 🎯 Best Practices
 
@@ -116,3 +116,20 @@ The labeling system is automatically configured when you run the "Setup Reposito
 ---
 
 *This system is designed to make your workflow smoother while maintaining consistency across the project. If you have suggestions for improvements, please create an issue or PR!*
+
+## Workflow implementation
+
+`pr-labels.yml` replaces the separate `pr-auto-label.yml`, retaining both check
+names: **Auto-Label Based on Branch Name** and **Validate Version Labels**.
+Validation follows labeling and still runs if labeling fails. The existing
+branch/domain mapping script is unchanged. Each PR has its own concurrency
+group; `pull_request_target` reads metadata without checkout, PR-code execution,
+or deployment/Slack credentials.
+
+The validator is vendored from [blessed-cicd at `c065d9448ae7`](https://github.com/JonathanPorta/blessed-cicd/blob/c065d9448ae79f92008393ae8f1bdc3410b601e7/.github/workflows/pr-labels.yml).
+Local adaptations preserve the existing job/check names, set the required
+policy and heading explicitly, and retain the bare `major` / `minor` / `patch`
+vocabulary. Exactly one is required; `version:*` labels do not satisfy this gate.
+Only `github-actions[bot]` owns reminder comments. Preserve these adaptations
+when refreshing the canonical validator; a direct reusable call changes check
+names and requires reconciling any required checks first.

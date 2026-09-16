@@ -1,11 +1,13 @@
 name: 🏷️ PR Label Validation
 
+# Consolidated PR metadata automation; see ../LABELING.md for provenance.
+# No checkout or PR-controlled commands are allowed with this write token.
 on:
-  pull_request:
-    types: [opened, synchronize, labeled, unlabeled]
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
@@ -13,97 +15,261 @@ permissions:
   issues: write
   pull-requests: write
 
-env:
-  SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
 jobs:
+  auto-label:
+    name: Auto-Label Based on Branch Name
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🏷️ Apply labels based on branch name
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
+        with:
+          script: |
+            const branchName = context.payload.pull_request.head.ref;
+            const prNumber = context.payload.pull_request.number;
+
+            console.log(`Processing branch: ${branchName}`);
+
+            // Define label mappings based on branch patterns
+            const labelMappings = [
+              // User-specific patterns (jp/type/description)
+              { pattern: /^[^/]+\/b\//, labels: ['🐛 bug'] },
+              { pattern: /^[^/]+\/f\//, labels: ['✨ feature'] },
+              { pattern: /^[^/]+\/d\//, labels: ['📚 docs'] },
+              { pattern: /^[^/]+\/c\//, labels: ['🧹 chore'] },
+              { pattern: /^[^/]+\/fix\//, labels: ['🐛 bug'] },
+              { pattern: /^[^/]+\/feat\//, labels: ['✨ feature'] },
+              { pattern: /^[^/]+\/doc\//, labels: ['📚 docs'] },
+              { pattern: /^[^/]+\/chore\//, labels: ['🧹 chore'] },
+              { pattern: /^[^/]+\/refactor\//, labels: ['♻️ refactor'] },
+              { pattern: /^[^/]+\/test\//, labels: ['🧪 test'] },
+              { pattern: /^[^/]+\/perf\//, labels: ['⚡ performance'] },
+              { pattern: /^[^/]+\/security\//, labels: ['🔒 security'] },
+
+              // Standard patterns (without user prefix)
+              { pattern: /^bug\//, labels: ['🐛 bug'] },
+              { pattern: /^bugfix\//, labels: ['🐛 bug'] },
+              { pattern: /^fix\//, labels: ['🐛 bug'] },
+              { pattern: /^feature\//, labels: ['✨ feature'] },
+              { pattern: /^feat\//, labels: ['✨ feature'] },
+              { pattern: /^docs\//, labels: ['📚 docs'] },
+              { pattern: /^doc\//, labels: ['📚 docs'] },
+              { pattern: /^chore\//, labels: ['🧹 chore'] },
+              { pattern: /^refactor\//, labels: ['♻️ refactor'] },
+              { pattern: /^test\//, labels: ['🧪 test'] },
+              { pattern: /^tests\//, labels: ['🧪 test'] },
+              { pattern: /^perf\//, labels: ['⚡ performance'] },
+              { pattern: /^performance\//, labels: ['⚡ performance'] },
+              { pattern: /^security\//, labels: ['🔒 security'] },
+              { pattern: /^sec\//, labels: ['🔒 security'] },
+              { pattern: /^hotfix\//, labels: ['🚨 hotfix', '🐛 bug'] },
+              { pattern: /^release\//, labels: ['🚀 release'] },
+              { pattern: /^dependabot\//, labels: ['📦 dependencies'] },
+              { pattern: /^deps\//, labels: ['📦 dependencies'] },
+              { pattern: /^dependencies\//, labels: ['📦 dependencies'] },
+
+              // Content-based patterns
+              { pattern: /ci|pipeline|workflow|github/, labels: ['🔧 ci/cd'] },
+              { pattern: /config|configuration|settings/, labels: ['⚙️ config'] },
+              { pattern: /style|css|ui|ux/, labels: ['🎨 style'] },
+              { pattern: /api|endpoint|service/, labels: ['🔌 api'] },
+              { pattern: /database|db|migration/, labels: ['🗄️ database'] },
+            ];
+
+            // Find matching labels
+            const labelsToApply = new Set();
+
+            for (const mapping of labelMappings) {
+              if (mapping.pattern.test(branchName.toLowerCase())) {
+                mapping.labels.forEach(label => labelsToApply.add(label));
+              }
+            }
+
+            // Convert to array
+            const finalLabels = Array.from(labelsToApply);
+
+            if (finalLabels.length > 0) {
+              console.log(`Applying labels: ${finalLabels.join(', ')}`);
+
+              // Get current PR labels
+              const { data: currentPR } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber
+              });
+
+              const currentLabels = currentPR.labels.map(label => label.name);
+
+              // Only add labels that aren't already present
+              const newLabels = finalLabels.filter(label => !currentLabels.includes(label));
+
+              if (newLabels.length > 0) {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  labels: newLabels
+                });
+
+                console.log(`✅ Added labels: ${newLabels.join(', ')}`);
+              } else {
+                console.log(`ℹ️ All relevant labels already applied`);
+              }
+            } else {
+              console.log(`ℹ️ No matching labels found for branch: ${branchName}`);
+            }
+
   validate-labels:
     name: Validate Version Labels
+    needs: auto-label
+    # Preserve validation even if automatic labeling fails; both checks remain.
+    if: ${{ always() }}
     runs-on: ubuntu-latest
-
     steps:
-    - name: 📥 Checkout repository
-      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - name: 🏷️ Validate semver label (major / minor / patch)
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8
+        env:
+          REQUIRE_SEMVER: 'true'
+          COMMENT_MARKER: 'Version Label Required'
+        with:
+          script: |
+            // Same retry helper as the labeler step. See the comment
+            // there for full rationale (transient 403 token-propagation
+            // race on pull_request_target).
+            const callWithRetry = async (label, fn) => {
+              const delays = [1000, 3000];
+              let lastErr;
+              for (let attempt = 0; attempt < delays.length + 1; attempt++) {
+                try {
+                  return await fn();
+                } catch (e) {
+                  lastErr = e;
+                  const status = e && e.status;
+                  const retriable = status === 403 || status === 429 || (status >= 500 && status < 600);
+                  if (!retriable || attempt === delays.length) throw e;
+                  const wait = delays[attempt];
+                  console.warn(`⚠ ${label} attempt ${attempt + 1} got ${status}; retrying in ${wait}ms...`);
+                  await new Promise(r => setTimeout(r, wait));
+                }
+              }
+              throw lastErr;
+            };
 
-    - name: 🏷️ Check for required version labels
-      uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
-      with:
-        script: |
-          const { data: pullRequest } = await github.rest.pulls.get({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            pull_number: context.issue.number
-          });
+            if (process.env.REQUIRE_SEMVER === 'false') {
+              console.log('Semver label validation disabled via input.');
+              return;
+            }
+            // A constant, hidden marker WE control identifies our nag
+            // comment, independent of the caller-set visible heading.
+            // Matching on caller input alone is unsafe: an empty override
+            // makes `includes('')` match every comment, and this job runs
+            // under pull_request_target with issues:write — it would then
+            // clobber an unrelated human/bot comment. Trim + default the
+            // visible marker so it can never be empty either.
+            const SENTINEL = '<!-- blessed-cicd:pr-labels -->';
+            const commentMarker = (process.env.COMMENT_MARKER || '').trim() || 'Version Label Required';
 
-          const labels = pullRequest.labels.map(label => label.name);
-          const versionLabels = ['major', 'minor', 'patch'];
-          const hasVersionLabel = versionLabels.some(label => labels.includes(label));
-
-          if (!hasVersionLabel) {
-            const branchName = context.payload.pull_request.head.ref;
-            const suggestedLabel = branchName.includes('/f/') || branchName.includes('/feat') || branchName.includes('feature') ? 'minor' : 'patch';
-
-            const comment = `## 🏷️ Version Label Required
-
-            This PR needs a version label to determine the type of release:
-
-            - \`major\` - Breaking changes (e.g., 1.0.0 → 2.0.0)
-            - \`minor\` - New features (e.g., 1.0.0 → 1.1.0)
-            - \`patch\` - Bug fixes (e.g., 1.0.0 → 1.0.1)
-
-            **💡 Suggestion:** Based on your branch name \`${branchName}\`, this looks like a **${suggestedLabel}** release.
-
-            Please add one of these labels to this PR.`;
-
-            // Check if comment already exists
-            const { data: comments } = await github.rest.issues.listComments({
+            // Re-fetch the PR so we see the labels the previous step
+            // just applied (the context payload reflects the event-time
+            // snapshot, which is stale by this point).
+            const { data: pullRequest } = await callWithRetry('pulls.get', () => github.rest.pulls.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
+              pull_number: context.issue.number
+            }));
 
-            const existingComment = comments.find(comment =>
-              comment.body.includes('Version Label Required')
-            );
+            const labels = pullRequest.labels.map(l => l.name);
+            // Preserve this repository's bare-label contract. In particular, the
+            // Terraform release workflow consumes exactly major/minor/patch.
+            const versionLabels = ['major', 'minor', 'patch'];
+            const present = versionLabels.filter(v => labels.includes(v));
 
-            if (!existingComment) {
-              await github.rest.issues.createComment({
+            // Find the single nag comment (missing OR conflict). Match the
+            // hidden sentinel first; fall back to the visible marker so nags
+            // posted by a pre-sentinel version of this workflow still get
+            // cleaned up. Both operands are guaranteed non-empty above.
+            const findNag = async () => {
+              const { data: comments } = await callWithRetry('listComments', () => github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              }));
+              return comments.find(c => c.user?.type === 'Bot'
+                && c.user?.login === 'github-actions[bot]'
+                && c.body && (c.body.includes(SENTINEL) || c.body.includes(commentMarker)));
+            };
+
+            // EXACTLY ONE semver label is required. Consumer release/deploy
+            // workflows reject more than one on the protected branch, so a
+            // "≥1" gate would push that failure to post-merge master time.
+            // Catch both zero (missing) and >1 (conflict) here at PR time.
+            if (present.length === 1) {
+              console.log(`✓ Exactly one semver label present: ${present[0]}`);
+              const stale = await findNag();
+              if (stale) {
+                await callWithRetry('deleteComment', () => github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: stale.id
+                }));
+                console.log('Removed stale "label required" comment.');
+              }
+              return;
+            }
+
+            // Build a markdown comment WITHOUT leading indentation on each
+            // line — script indentation would otherwise render as a code
+            // block. Two shapes: missing (0) vs conflict (>1).
+            const branchName = context.payload.pull_request.head.ref;
+            const suggested = (
+              /\/(f|feat|feature)\//.test(branchName) ||
+              /^(feat|feature)\//.test(branchName)
+            ) ? 'minor' : 'patch';
+
+            const comment = (present.length === 0
+              ? [
+                SENTINEL,
+                `## 🏷️ ${commentMarker}`,
+                '',
+                'This PR needs a version label to determine the release type:',
+                '',
+                '- `major` — breaking changes (e.g. 1.0.0 → 2.0.0)',
+                '- `minor` — new features (e.g. 1.0.0 → 1.1.0)',
+                '- `patch` — bug fixes (e.g. 1.0.0 → 1.0.1)',
+                '',
+                `**Suggestion:** based on branch \`${branchName}\`, this looks like a **\`${suggested}\`** release.`,
+                '',
+                'Add one of the labels above and this check will re-run.'
+              ]
+              : [
+                SENTINEL,
+                `## 🏷️ ${commentMarker}`,
+                '',
+                `This PR has multiple version labels: ${present.map(l => `\`${l}\``).join(', ')}.`,
+                '',
+                'The release pipeline requires **exactly one** so the version bump is unambiguous. Remove all but one of them.',
+                '',
+                'This check will re-run when the labels change.'
+              ]
+            ).join('\n');
+
+            // Don't duplicate the nag — overwrite if one exists, post if not.
+            const previous = await findNag();
+            if (previous) {
+              await callWithRetry('updateComment', () => github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body: comment
+              }));
+            } else {
+              await callWithRetry('createComment', () => github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
                 body: comment
-              });
+              }));
             }
 
-            core.setFailed('PR is missing a version label (major, minor, or patch)');
-          } else {
-            // Remove the comment if it exists and labels are now present
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number
-            });
-
-            const existingComment = comments.find(comment =>
-              comment.body.includes('Version Label Required')
-            );
-
-            if (existingComment) {
-              await github.rest.issues.deleteComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existingComment.id
-              });
-            }
-
-            console.log(`✅ PR has version label: ${labels.filter(l => versionLabels.includes(l)).join(', ')}`);
-          }
-
-    - name: 📢 Notify Slack
-      uses: ./.github/actions/slack-notify
-      with:
-        webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
-        status: ${{ job.status }}
-        environment: 'pr-validation'
-        workflow_name: ${{ github.workflow }}
-      if: always()
+            core.setFailed(present.length === 0
+              ? 'PR is missing a semver label (major / minor / patch).'
+              : `PR has multiple semver labels (${present.join(', ')}); exactly one is required.`);

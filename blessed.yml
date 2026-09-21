@@ -1,0 +1,19 @@
+schema: blessed/repo/v1
+project: terraform-aws-s3-static-site
+component: module
+repo_type: terraform-module
+stage: active
+stack: [terraform, aws-s3]
+standards: []
+capabilities:
+  - sha-pinning
+tracked_dependencies:
+  ai_rules: null
+  blessed_scripts:
+    bws: null
+    ruam: null
+notes: |
+  Reusable Terraform module for S3 static-site hosting.
+  Existing GitHub Actions references are pinned to full commit SHAs.
+  The existing release workflow creates version tags after merges carrying
+  a semantic-version label; no versioned standards adoption is declared.

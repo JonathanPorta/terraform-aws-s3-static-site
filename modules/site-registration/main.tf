@@ -42,8 +42,19 @@ resource "aws_s3_object" "registration" {
   # next apply. The registry bucket uses SSE-S3; with SSE-KMS the ETag is not an
   # md5, so this would show a permanent diff (the bug the root module's README
   # documents) and `etag` would have to be replaced by `source_hash`, which only
-  # detects local changes. No acl argument: the bucket enforces bucket-owner-only.
+  # detects local changes.
   etag = md5(local.content)
+
+  # The registry bucket is BucketOwnerEnforced: S3 accepts an upload only with
+  # no ACL or with bucket-owner-full-control, and rejects any other ACL with
+  # 400 AccessControlListNotSupported. AWS provider 4.8 cannot omit the ACL
+  # (object.go: `acl` defaults to "private" and is copied into UploadInput.ACL),
+  # and its default "private" would be rejected. bucket-owner-full-control is
+  # the one canned ACL such a bucket accepts; it grants nothing to anyone, since
+  # the bucket owner is the only owner. Provider 5.0 removed the default (so the
+  # argument could be omitted); the `~> 4.8.0` pin keeps this explicit value
+  # correct.
+  acl = "bucket-owner-full-control"
 
   tags = var.tags
 

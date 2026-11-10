@@ -27,7 +27,7 @@ die() { echo "  ✗✗ $1" >&2; exit 1; }
 
 cleanup() {
   rm -rf "$FIX/.terraform" "$FIX/.terraform.lock.hcl" "$FIX"/terraform.tfstate* \
-         "$FIX"/plan.tfplan "$FIX"/case.tfvars.json "$FIX"/plan.log \
+         "$FIX"/plan.tfplan "$HERE"/site-registration-control/.terraform "$HERE"/site-registration-control/.terraform.lock.hcl "$HERE"/site-registration-control/plan.tfplan "$FIX"/case.tfvars.json "$FIX"/plan.log \
          "$MOD/.terraform" "$MOD/.terraform.lock.hcl"
 }
 trap cleanup EXIT
@@ -76,14 +76,37 @@ expect='{"checks":["dns","domain","http","tls"],"enabled":true,"environment":"pr
   && ok "content_type is application/json" || no "wrong content_type"
 [ "$(printf '%s' "$PJ" | obj_attr etag)" = "$(md5_of "$content")" ] \
   && ok "etag is the raw md5 of the content (drift detection)" || no "etag is not md5(content)"
-# Provider 4.8 gives `acl` a schema default of "private" and cannot omit it, so the
-# plan always shows acl = "private". What the module controls is that it never
-# sets one itself.
-grep -Eq '^[[:space:]]*acl[[:space:]]*=' "$MOD/main.tf" \
-  && no "the module sets an acl argument" || ok "the module sets no acl argument"
-[ "$(printf '%s' "$PJ" | obj_attr acl)" = "private" ] \
-  && ok "the planned acl is the provider 4.8 default (private), not something the module chose" \
-  || no "planned acl is not the provider default: $(printf '%s' "$PJ" | obj_attr acl)"
+# The upload ACL: provider 4.8 copies `acl` into the PutObject request (default
+# "private"), and a BucketOwnerEnforced bucket accepts only an omitted ACL or
+# bucket-owner-full-control (S3 Object Ownership docs). The rule is encoded as a
+# table and checked against the ACL in the plan, the value the provider sends.
+acl_accepted() { python3 - "$1" <<'PY'
+import sys
+ACCEPTED = {"", "bucket-owner-full-control"}   # "" = omitted
+sys.exit(0 if sys.argv[1] in ACCEPTED else 1)
+PY
+}
+for a in "" bucket-owner-full-control; do
+  acl_accepted "$a" && ok "rule table: '${a:-<omitted>}' is accepted by an owner-enforced bucket" || no "rule table rejects '${a:-<omitted>}'"
+done
+for a in private public-read public-read-write authenticated-read aws-exec-read bucket-owner-read log-delivery-write; do
+  acl_accepted "$a" && no "rule table accepts '$a'" || ok "rule table: '$a' is rejected by an owner-enforced bucket"
+done
+mod_acl="$(printf '%s' "$PJ" | obj_attr acl)"
+acl_accepted "$mod_acl" && ok "the module's planned upload ACL ('$mod_acl') is accepted by an owner-enforced bucket" \
+  || no "the module's planned upload ACL ('$mod_acl') would be rejected"
+[ "$mod_acl" = "bucket-owner-full-control" ] && ok "the planned ACL is bucket-owner-full-control" || no "planned ACL is '$mod_acl'"
+# Negative control: the same check must reject a bare aws_s3_object with the
+# provider 4.8 default, and with an explicit public-read.
+CTL="$HERE/site-registration-control"
+( cd "$CTL" && "$TFBIN" init -backend=false -input=false >/dev/null 2>&1 ) || die "control init failed"
+for acl_in in default public-read; do
+  args=(); [ "$acl_in" != default ] && args=(-var "acl=$acl_in")
+  ( cd "$CTL" && "$TFBIN" plan -input=false -refresh=false -no-color ${args[@]+"${args[@]}"} -out=plan.tfplan >/dev/null 2>&1 ) || die "control plan failed"
+  c_acl="$( cd "$CTL" && "$TFBIN" show -json plan.tfplan | obj_attr acl )"
+  if acl_accepted "$c_acl"; then no "negative control ($acl_in): ACL '$c_acl' passed the check"; else ok "negative control ($acl_in): ACL '$c_acl' is rejected by the check"; fi
+done
+rm -rf "$CTL/.terraform" "$CTL/.terraform.lock.hcl" "$CTL/plan.tfplan" "$CTL"/terraform.tfstate*
 [ "$(printf '%s' "$PJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["planned_values"]["outputs"]["document"]["value"]==json.loads(sys.argv[1]))' "$content")" = "True" ] \
   && ok "the document output is the decoded content" || no "document output differs from content"
 printf '%s' "$content" > "$FIX/doc-full.json.tmp"

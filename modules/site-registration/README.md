@@ -51,7 +51,13 @@ Keys are in lexical order (what `jsonencode` produces), `checks` is sorted, and 
 
 ## Drift detection
 
-`etag = md5(content)`. For a single-part object stored without KMS, S3 reports the raw md5 as the ETag, so every refresh compares the stored bytes with the desired bytes: an out-of-band edit is reverted by the next apply, and a deleted object is re-created (this needs `s3:ListBucket`, see below). The registry bucket uses SSE-S3 (the bucket default); **with SSE-KMS the ETag is not an md5 and this would show a permanent diff.** If the bucket ever moves to KMS, replace `etag` with `source_hash`, which only detects changes made through Terraform. The module sets no `acl` argument: the bucket enforces bucket-owner-only. (Provider 4.8 still sends its default, `private`; confirm on the first apply that a bucket-owner-enforced bucket accepts it.)
+`etag = md5(content)`. For a single-part object stored without KMS, S3 reports the raw md5 as the ETag, so every refresh compares the stored bytes with the desired bytes: an out-of-band edit is reverted by the next apply, and a deleted object is re-created (this needs `s3:ListBucket`, see below). The registry bucket uses SSE-S3 (the bucket default); **with SSE-KMS the ETag is not an md5 and this would show a permanent diff.** If the bucket ever moves to KMS, replace `etag` with `source_hash`, which only detects changes made through Terraform. The module sets `acl = "bucket-owner-full-control"` explicitly: see the next section.
+
+## Object ACL
+
+The registry bucket is `BucketOwnerEnforced` (ACLs disabled). S3 then accepts an upload only with no ACL or with `bucket-owner-full-control`, and rejects any other ACL, including `private`, with HTTP 400 `AccessControlListNotSupported` ([Object Ownership](https://docs.aws.amazon.com/AmazonS3/latest/userguide/about-object-ownership.html)). AWS provider 4.8 cannot omit the ACL: `acl` defaults to `private` and is copied into the upload (`internal/service/s3/object.go`). The module therefore sets `acl = "bucket-owner-full-control"`. This is the writer contract for the registry bucket. Provider 5.0 removed the default and 6.x still has `acl`, so a later provider bump does not break this; the `~> 4.8.0` constraint is unchanged.
+
+Live acceptance of this by the real bucket has not been demonstrated yet; the tests check the planned ACL only.
 
 ## Inputs
 
@@ -90,7 +96,7 @@ Only on this site's own keys, `arn:aws:s3:::<registry_bucket>/registrations/v1/<
 | Action | Used for |
 |---|---|
 | `s3:PutObject` | create, update (and `s3:PutObjectTagging` when `tags` is non-empty or the provider sets `default_tags`) |
-| `s3:PutObjectAcl` | provider 4.8 always sends an object ACL on upload (`acl` defaults to `private` and cannot be omitted), and S3 requires this permission for a request that carries an ACL header. The bucket enforces bucket-owner-only, so the grant cannot confer access |
+| `s3:PutObjectAcl` | an upload that carries an ACL header needs it in addition to `s3:PutObject` (S3 API permissions table for PutObject, <https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html>), and the module always sends `bucket-owner-full-control`. It cannot make any other ACL valid and confers no access, because the bucket owner is the only owner |
 | `s3:GetObject` | refresh (`HeadObject`) |
 | `s3:GetObjectTagging` | refresh, on every refresh even with no tags |
 | `s3:PutObjectTagging`, `s3:DeleteObjectTagging` | tag changes |

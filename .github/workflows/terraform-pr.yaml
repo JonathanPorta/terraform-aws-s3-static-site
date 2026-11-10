@@ -65,6 +65,13 @@ jobs:
       - name: Release version arithmetic
         run: bash tests/next-version.sh --self-test
 
+      # The submodule is its own module with its own provider requirements, so
+      # the root `init`/`validate` above never loads it.
+      - name: Terraform init and validate (modules/site-registration)
+        run: |
+          terraform -chdir=modules/site-registration init -backend=false -input=false
+          terraform -chdir=modules/site-registration validate
+
   # The behaviour this module documents is PROVIDER behaviour, so it has to be
   # exercised against the pinned provider on real CI rather than asserted in
   # prose. It runs no AWS API calls and needs no credentials.
@@ -85,6 +92,9 @@ jobs:
 
       - name: 🔁 Assert the object ETag converges
         run: bash tests/assert-etag-convergence.sh
+
+      - name: Site registration submodule stores the contract document and rejects invalid input
+        run: bash tests/assert-site-registration.sh
 
   # Note: the `Check for semantic version label` and `Check for pull
   # request type label` jobs that used to live here have been removed.

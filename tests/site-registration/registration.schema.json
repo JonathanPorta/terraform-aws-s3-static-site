@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://monitoring.porta.codes/schemas/registration-v1.json",
+  "title": "Site registration document, version 1",
+  "description": "One non-secret JSON document per service/environment, stored at registrations/v1/<owner>/<service>/<environment>.json. The reconciler (roles/site_registry) is authoritative and additionally enforces what JSON Schema cannot express: owner, service and environment must equal the key path; hostname must equal the host of url; registered_domain must be a suffix of hostname; hostname must not be an IP literal, localhost, a single label, or end in a reserved suffix (.local, .internal, .ts.net, .lan, .test, .example, .invalid, ...); documents are at most 4096 bytes; JSON objects must not repeat a field.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "owner",
+    "service",
+    "environment",
+    "url",
+    "hostname",
+    "registered_domain",
+    "checks"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "owner": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
+    },
+    "service": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$",
+      "not": {
+        "pattern": "\\.\\."
+      }
+    },
+    "environment": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "id": {
+      "description": "Optional stable site id override (a slug); defaults to the slug of <service>-<environment>. Must be unique across registrations.",
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
+    },
+    "url": {
+      "description": "https only, no credentials, port, query or fragment; its host must equal hostname.",
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^https://[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+(/[\\x21\\x24-\\x3e\\x40-\\x7e]*)?$"
+    },
+    "hostname": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+    },
+    "registered_domain": {
+      "description": "The registered domain; the domain-expiry check belongs to it, one per domain across all registrations.",
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$"
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "http",
+          "dns",
+          "tls",
+          "domain"
+        ]
+      }
+    },
+    "overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "http_response_ms": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 30000
+        },
+        "body_contains": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9 ._,:;!?@#%&+/~-]{1,100}$"
+        },
+        "dns_resolver": {
+          "enum": [
+            "1.1.1.1:53",
+            "1.0.0.1:53",
+            "8.8.8.8:53",
+            "8.8.4.4:53",
+            "9.9.9.9:53",
+            "149.112.112.112:53",
+            "208.67.222.222:53",
+            "208.67.220.220:53"
+          ]
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "version": 1,
+      "owner": "JonathanPorta",
+      "service": "docsort.io",
+      "environment": "production",
+      "enabled": true,
+      "url": "https://www.docsort.io/",
+      "hostname": "www.docsort.io",
+      "registered_domain": "docsort.io",
+      "checks": [
+        "http",
+        "dns",
+        "tls",
+        "domain"
+      ],
+      "overrides": {
+        "http_response_ms": 5000,
+        "body_contains": "DocSort",
+        "dns_resolver": "1.1.1.1:53"
+      }
+    }
+  ]
+}

@@ -45,15 +45,16 @@ resource "aws_s3_object" "registration" {
   # detects local changes.
   etag = md5(local.content)
 
-  # The registry bucket is BucketOwnerEnforced: S3 accepts an upload only with
-  # no ACL or with bucket-owner-full-control, and rejects any other ACL with
-  # 400 AccessControlListNotSupported. AWS provider 4.8 cannot omit the ACL
-  # (object.go: `acl` defaults to "private" and is copied into UploadInput.ACL),
-  # and its default "private" would be rejected. bucket-owner-full-control is
-  # the one canned ACL such a bucket accepts; it grants nothing to anyone, since
-  # the bucket owner is the only owner. Provider 5.0 removed the default (so the
-  # argument could be omitted); the `~> 4.8.0` pin keeps this explicit value
-  # correct.
+  # The registry bucket is BucketOwnerEnforced, and its writer contract is
+  # bucket-owner-full-control (or no ACL): the canned ACL AWS documents as
+  # accepted by such a bucket from any writer. AWS provider 4.8 cannot omit the
+  # ACL (object.go: `acl` defaults to "private" and is copied into
+  # UploadInput.ACL), so the contract value is set explicitly. It grants nothing
+  # to anyone, since the bucket owner is the only owner. Verified live on
+  # 2026-11-10: accepted. The default "private" was accepted too for a writer in
+  # the bucket-owning account; another account was not tested. Provider 5.0
+  # removed the default (so the argument could be omitted); the `~> 4.8.0` pin
+  # keeps this explicit value correct.
   acl = "bucket-owner-full-control"
 
   tags = var.tags

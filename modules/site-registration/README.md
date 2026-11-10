@@ -55,9 +55,9 @@ Keys are in lexical order (what `jsonencode` produces), `checks` is sorted, and 
 
 ## Object ACL
 
-The registry bucket is `BucketOwnerEnforced` (ACLs disabled). S3 then accepts an upload only with no ACL or with `bucket-owner-full-control`, and rejects any other ACL, including `private`, with HTTP 400 `AccessControlListNotSupported` ([Object Ownership](https://docs.aws.amazon.com/AmazonS3/latest/userguide/about-object-ownership.html)). AWS provider 4.8 cannot omit the ACL: `acl` defaults to `private` and is copied into the upload (`internal/service/s3/object.go`). The module therefore sets `acl = "bucket-owner-full-control"`. This is the writer contract for the registry bucket. Provider 5.0 removed the default and 6.x still has `acl`, so a later provider bump does not break this; the `~> 4.8.0` constraint is unchanged.
+The registry bucket is `BucketOwnerEnforced` (ACLs disabled). The registry's writer contract is to send `bucket-owner-full-control`, or no ACL: it is the canned ACL AWS documents as accepted by such a bucket from any writer ([Object Ownership](https://docs.aws.amazon.com/AmazonS3/latest/userguide/about-object-ownership.html)), so it does not depend on which account the writer is in. AWS provider 4.8 cannot omit the ACL: `acl` defaults to `private` and is copied into the upload (`internal/service/s3/object.go`). The module therefore sets `acl = "bucket-owner-full-control"` explicitly. Provider 5.0 removed the default and 6.x still has `acl`, so a later provider bump does not break this; the `~> 4.8.0` constraint is unchanged.
 
-Live acceptance of this by the real bucket has not been demonstrated yet; the tests check the planned ACL only.
+Verified on the live registry bucket on 2026-11-10 with this module at 1.7.0, provider 4.8.0 and a writer in the bucket-owning account: create, update and delete succeed with this ACL. The provider's default `private` was also accepted by the bucket for that same-account writer, so an earlier statement here that `private` is refused was wrong for that case. A writer in another account was not tested. The tests check that the planned ACL equals the contract; they do not model S3's behaviour.
 
 ## Inputs
 

@@ -77,9 +77,10 @@ expect='{"checks":["dns","domain","http","tls"],"enabled":true,"environment":"pr
 [ "$(printf '%s' "$PJ" | obj_attr etag)" = "$(md5_of "$content")" ] \
   && ok "etag is the raw md5 of the content (drift detection)" || no "etag is not md5(content)"
 # The upload ACL: provider 4.8 copies `acl` into the PutObject request (default
-# "private"), and a BucketOwnerEnforced bucket accepts only an omitted ACL or
-# bucket-owner-full-control (S3 Object Ownership docs). The rule is encoded as a
-# table and checked against the ACL in the plan, the value the provider sends.
+# "private"). The registry's writer CONTRACT is an omitted ACL or
+# bucket-owner-full-control. This table is that contract, checked against the
+# ACL in the plan (the value the provider sends). It does not model which ACLs
+# S3 accepts: live, a same-account writer's "private" is accepted as well.
 acl_accepted() { python3 - "$1" <<'PY'
 import sys
 ACCEPTED = {"", "bucket-owner-full-control"}   # "" = omitted
@@ -87,16 +88,16 @@ sys.exit(0 if sys.argv[1] in ACCEPTED else 1)
 PY
 }
 for a in "" bucket-owner-full-control; do
-  acl_accepted "$a" && ok "rule table: '${a:-<omitted>}' is accepted by an owner-enforced bucket" || no "rule table rejects '${a:-<omitted>}'"
+  acl_accepted "$a" && ok "contract table: '${a:-<omitted>}' meets the registry writer contract" || no "contract table excludes '${a:-<omitted>}'"
 done
 for a in private public-read public-read-write authenticated-read aws-exec-read bucket-owner-read log-delivery-write; do
-  acl_accepted "$a" && no "rule table accepts '$a'" || ok "rule table: '$a' is rejected by an owner-enforced bucket"
+  acl_accepted "$a" && no "contract table includes '$a'" || ok "contract table: '$a' is outside the registry writer contract"
 done
 mod_acl="$(printf '%s' "$PJ" | obj_attr acl)"
-acl_accepted "$mod_acl" && ok "the module's planned upload ACL ('$mod_acl') is accepted by an owner-enforced bucket" \
-  || no "the module's planned upload ACL ('$mod_acl') would be rejected"
+acl_accepted "$mod_acl" && ok "the module's planned upload ACL ('$mod_acl') meets the registry writer contract" \
+  || no "the module's planned upload ACL ('$mod_acl') is outside the contract"
 [ "$mod_acl" = "bucket-owner-full-control" ] && ok "the planned ACL is bucket-owner-full-control" || no "planned ACL is '$mod_acl'"
-# Negative control: the same check must reject a bare aws_s3_object with the
+# Negative control: the same check must fail a bare aws_s3_object with the
 # provider 4.8 default, and with an explicit public-read.
 CTL="$HERE/site-registration-control"
 ( cd "$CTL" && "$TFBIN" init -backend=false -input=false >/dev/null 2>&1 ) || die "control init failed"
@@ -104,7 +105,7 @@ for acl_in in default public-read; do
   args=(); [ "$acl_in" != default ] && args=(-var "acl=$acl_in")
   ( cd "$CTL" && "$TFBIN" plan -input=false -refresh=false -no-color ${args[@]+"${args[@]}"} -out=plan.tfplan >/dev/null 2>&1 ) || die "control plan failed"
   c_acl="$( cd "$CTL" && "$TFBIN" show -json plan.tfplan | obj_attr acl )"
-  if acl_accepted "$c_acl"; then no "negative control ($acl_in): ACL '$c_acl' passed the check"; else ok "negative control ($acl_in): ACL '$c_acl' is rejected by the check"; fi
+  if acl_accepted "$c_acl"; then no "negative control ($acl_in): ACL '$c_acl' passed the check"; else ok "negative control ($acl_in): ACL '$c_acl' is outside the contract and fails the check"; fi
 done
 rm -rf "$CTL/.terraform" "$CTL/.terraform.lock.hcl" "$CTL/plan.tfplan" "$CTL"/terraform.tfstate*
 [ "$(printf '%s' "$PJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["planned_values"]["outputs"]["document"]["value"]==json.loads(sys.argv[1]))' "$content")" = "True" ] \

@@ -131,6 +131,10 @@ Two caveats worth knowing before you adopt it:
 
 Upgrading is a no-op for public consumers: the bucket ACL gains a `count` index, and a `moved` block tells Terraform that is a refactor rather than a replace, so no state migration is required.
 
+### Site registration submodule
+
+`modules/site-registration` registers a site with the monitoring server by storing one small JSON document in a private registry bucket with a native `aws_s3_object`. It is a separate module (`source = "JonathanPorta/s3-static-site/aws//modules/site-registration"`, pinned to a release) and does not change this module or its `betteruptime_monitor`. See [its README](modules/site-registration/README.md): inputs, outputs, the IAM permissions needed, and the fact that a successful apply means the registration is stored, not that the monitoring server has applied it.
+
 ### v2 roadmap (planned)
 
 Private mode already adopts the modern posture — `BucketOwnerEnforced`, no ACLs, policy as the sole access-control mechanism — but only when opted into. A future v2 will make it the default for *public* sites too:
@@ -144,11 +148,12 @@ That remains a breaking change for public consumers, which is why it stays defer
 
 ## Development
 
-Four checks run on every PR, and all four are runnable locally:
+Checks run on every PR, and all are runnable locally:
 
 ```sh
 bash tests/assert-composition.sh        # bucket-policy merge semantics, against the pinned provider
 bash tests/assert-private-origin.sh     # private mode closes the origin; the public default is unchanged
+bash tests/assert-site-registration.sh  # modules/site-registration: stored document, validations, against the pinned provider
 bash tests/assert-actions-pinned.sh     # every third-party GitHub Action is pinned to a commit SHA
 bash tests/next-version.sh --self-test  # the arithmetic that names a release
 bash tests/render-docs.sh               # regenerate the block below, then commit the result

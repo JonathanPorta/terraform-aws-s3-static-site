@@ -31,7 +31,7 @@ variable "error_document_key" {
   default     = "index.html"
 }
 variable "monitoring" {
-  description = "Whether or not to enable monitoring."
+  description = "LEGACY. Whether to create a Better Stack (Better Uptime) monitor for this site. Leave it false for new sites and register the site with the monitoring server through modules/site-registration instead."
   type        = bool
   default     = false
 

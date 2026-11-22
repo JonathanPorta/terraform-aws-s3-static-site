@@ -59,7 +59,7 @@ data "aws_iam_policy_document" "deny_insecure_transport" {
 
 module "static_website" {
   source  = "JonathanPorta/s3-static-site/aws"
-  version = "1.7.1"
+  version = "1.7.2"
   # ...
 
   extra_policy_documents = [

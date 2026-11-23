@@ -59,7 +59,7 @@ data "aws_iam_policy_document" "deny_insecure_transport" {
 
 module "static_website" {
   source  = "JonathanPorta/s3-static-site/aws"
-  version = "1.5.0"
+  version = "1.7.2"
   # ...
 
   extra_policy_documents = [
@@ -134,6 +134,13 @@ Upgrading is a no-op for public consumers: the bucket ACL gains a `count` index,
 ### Site registration submodule
 
 `modules/site-registration` registers a site with the monitoring server by storing one small JSON document in a private registry bucket with a native `aws_s3_object`. It is a separate module (`source = "JonathanPorta/s3-static-site/aws//modules/site-registration"`, pinned to a release) and does not change this module or its `betteruptime_monitor`. See [its README](modules/site-registration/README.md): inputs, outputs, the IAM permissions needed, and the fact that a successful apply means the registration is stored, not that the monitoring server has applied it.
+
+There are two different things called monitoring here, and only one is current:
+
+- **`monitoring` (this module's input) is legacy.** It creates a Better Stack (Better Uptime) monitor and defaults to `false`. Do not enable it for a new site. It remains only so that existing sites can retire their monitor per workspace by setting it back to `false`.
+- **`modules/site-registration` is how a new site gets monitored.** It needs no Better Stack account: only the registry bucket name and an enrolled site identity.
+
+A site that sets neither is not monitored at all.
 
 ### v2 roadmap (planned)
 
@@ -214,7 +221,7 @@ No modules.
 | <a name="input_extra_policy_documents"></a> [extra\_policy\_documents](#input\_extra\_policy\_documents) | Additional IAM policy documents to compose into this bucket's single policy,<br/>as rendered JSON — typically `data.aws_iam_policy_document.<name>.json`.<br/><br/>A bucket has exactly one policy and this module owns it, so a consumer cannot<br/>declare a second `aws_s3_bucket_policy`, and must not apply one out of band<br/>(the next apply would silently revert it). Contribute statements here instead.<br/><br/>Authoring them as `aws_iam_policy_document` data sources gives you structured<br/>HCL and deterministic JSON composition. It does NOT validate IAM semantics:<br/>unknown actions, malformed resources, invented principal types, and unknown<br/>condition operators all render fine and are rejected later by AWS, when the<br/>policy is applied.<br/><br/>Supplied to `override_policy_documents`, so a document with a unique Sid is<br/>appended and one reusing `PublicReadGetObject` replaces the built-in<br/>statement. (They cannot go in `source_policy_documents`: duplicate Sids there<br/>are a hard provider error.)<br/><br/>Default `[]` yields a policy semantically equivalent to pre-1.5.0 and leaves<br/>the `aws_s3_bucket_policy` resource address unchanged, so no replacement or<br/>state-address churn is expected. The rendered JSON is not byte-for-byte<br/>identical to the previous `jsonencode` output. | `list(string)` | `[]` | no |
 | <a name="input_hostname"></a> [hostname](#input\_hostname) | The FQDN where this static site will be accessible. | `string` | n/a | yes |
 | <a name="input_index_document_suffix"></a> [index\_document\_suffix](#input\_index\_document\_suffix) | The optional name of the index document to use for the bucket. | `string` | `"index.html"` | no |
-| <a name="input_monitoring"></a> [monitoring](#input\_monitoring) | Whether or not to enable monitoring. | `bool` | `false` | no |
+| <a name="input_monitoring"></a> [monitoring](#input\_monitoring) | LEGACY. Whether to create a Better Stack (Better Uptime) monitor for this site. Leave it false for new sites and register the site with the monitoring server through modules/site-registration instead. | `bool` | `false` | no |
 | <a name="input_private_origin"></a> [private\_origin](#input\_private\_origin) | Serve the site to a fronting CDN only, instead of to the public internet.<br/><br/>When true the module sets object\_ownership = "BucketOwnerEnforced", enables<br/>ALL FOUR public-access-block settings, creates no bucket ACL, sets no object<br/>ACLs, and conditions the read policy on BOTH the caller's egress CIDRs<br/>(aws:SourceIp) AND a shared origin secret (aws:Referer).<br/><br/>Requires private\_origin\_allowed\_cidrs and private\_origin\_referer\_secret.<br/>Leaving it false changes nothing about this module's behaviour. | `bool` | `false` | no |
 | <a name="input_private_origin_allowed_cidrs"></a> [private\_origin\_allowed\_cidrs](#input\_private\_origin\_allowed\_cidrs) | Egress CIDR blocks permitted to read the bucket in private mode, normally<br/>the fronting CDN's published ranges.<br/><br/>Pinned in source rather than fetched at apply time, so a change to the<br/>security boundary is a reviewable diff instead of a silent drift. A stale<br/>list fails closed. | `list(string)` | `[]` | no |
 | <a name="input_private_origin_referer_secret"></a> [private\_origin\_referer\_secret](#input\_private\_origin\_referer\_secret) | Shared secret the fronting CDN must send as the Referer header on every<br/>origin request in private mode. At least 32 characters.<br/><br/>This is what distinguishes THIS CDN zone from every other tenant of the same<br/>egress ranges; the CIDR allowlist alone authenticates the CDN, not the<br/>account. Rotate by changing this value and re-applying — no data migration.<br/><br/>Note: a bucket policy condition value is necessarily part of the resource,<br/>so this appears in Terraform state and in plan output. Mark your state<br/>backend accordingly. `sensitive` keeps it out of CLI output and logs. | `string` | `null` | no |
